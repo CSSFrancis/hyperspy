@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataConfig>
+    <ImageAction>I_O_M_M</ImageAction>
+    <ImageAction>I_O_M_P</ImageAction>
+    <ImageAction>I_O_M_T</ImageAction>
+    <ImageAction>I_O_S</ImageAction>
+    <ImageAction>I_P_C_D_G_R</ImageAction>
+    <ImageAction>I_P_E_L_S</ImageAction>
+    <ImageAction>I_P_F_H</ImageAction>
+</DataConfig>

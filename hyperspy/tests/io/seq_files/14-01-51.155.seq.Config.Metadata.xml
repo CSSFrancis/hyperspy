@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<Configuration>
+    <PixelSize>
+        <!-- Mag Table Examples:		
+        <Property Mag="100" Value="0.04576" />		
+        <Property Mag="500" Value="0.00920" />	
+        
+        Note: Mag="100" => 100 (K)
+              Value="0.04576" => 0.04576 (nm)	
+        -->
+        <Property Mag="4.9" Value="0.7681" />
+        <Property Mag="6.3" Value="0.6128" />
+        <Property Mag="8.1" Value="0.4729" />
+        <Property Mag="10" Value="0.3837" />
+        <Property Mag="13" Value="0.2979" />
+        <Property Mag="34" Value="0.1327" />
+        <Property Mag="43" Value="0.1064" />
+        <Property Mag="56" Value="0.0841" />
+        <Property Mag="69" Value="0.0709" />
+        <Property Mag="87" Value="0.0547" />
+        <Property Mag="115" Value="0.0416" />
+        <Property Mag="145" Value="0.0328" />
+        <Property Mag="185" Value="0.0248" />
+        <Property Mag="245" Value="0.0180" />
+    </PixelSize>
+    <DiffPixelSize>
+        <!-- Diff Table Examples:
+        <Property CameraLength="0.25" Value="0.00175" />    
+        <Property CameraLength="1.00" Value="0.000248" /> 
+        
+        Note: CameraLength="0.25" => 0.25 (m)
+              value="0.00175" => 0.00175 (nm)        
+        -->
+    </DiffPixelSize>
+    <BadPixels>
+        <BadPixelMap Rows="4096" Columns="4096">
+            <!-- Examples:	
+			<Defect Row="109" Column="152" />
+			<Defect Row="300" />
+			<Defect Column="600" />
+			<Defect Rows="200-220" />
+			<Defect Columns="500-510" />
+			-->
+            <Defect Column="1838" />
+            <Defect Columns="0-12" />
+        </BadPixelMap>
+        <BadPixelMap Binning="2" Rows="2048" Columns="2048">
+            <!-- Examples:
+			<Defect Row="100" Column="150" />
+			<Defect Row="500" />
+			<Defect Column="500" />
+			<Defect Rows="200-220" />
+			<Defect Columns="200-220" />		
+			-->
+        </BadPixelMap>
+    </BadPixels>
+</Configuration>
