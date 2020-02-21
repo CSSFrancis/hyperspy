@@ -44,6 +44,7 @@ class SeqReader(object):
         self.metadata_dict = None
         self.frame_width = None
         self.frame_height = None
+        self.frame_length =None
         self.num_frames = None
         self.img_bytes = None
         self.dark_ref = None
@@ -77,6 +78,7 @@ class SeqReader(object):
             read_bytes = file.read(20)
             self.frame_width = struct.unpack('<L', read_bytes[0:4])[0]
             self.frame_height = struct.unpack('<L', read_bytes[4:8])[0]
+            self.frame_length=self.frame_height*self.frame_width
             _logger.info('Each frame is %i x %i pixels', (self.frame_width, self.frame_width))
             file.seek(572)
 
@@ -137,27 +139,27 @@ class SeqReader(object):
 
         return axes
 
-    def _get_image(self, start):
+    def _get_image(self):
         with open(self.f, mode='rb') as file:
-            file.seek(start)
-            read_bytes = file.read(self.frame_width*self.frame_height*2)
-            # loading from buffer
-            frame = np.reshape(np.frombuffer(read_bytes, dtype=np.uint16), (self.frame_width, self.frame_height))
-            if self.dark_ref is not None and self.gain_ref is not None:
-                frame = (frame - self.dark_ref) * self.gain_ref
-            frame.astype(dtype=np.int32)  # This should probably happen before gain and darkref are applied
-            return frame
+            data = np.empty(self.num_frames*self.frame_length, dtype=np.uint16)  # creating an empty array
+            file.seek(8192)
+            for i in range(self.num_frames):
+                file.seek(8192+i*self.img_bytes)
+                if self.dark_ref is not None and self.gain_ref is not None:
+                    data[i] = (np.fromfile(file, np.uint16, count=1) - self.dark_ref) * self.gain_ref
+                else:
+                    data[i*self.frame_length:(i+1)*self.frame_length] = np.fromfile(file, np.uint16, count=self.frame_length)
+        return data
 
     def read_data(self, lazy=False):
         if lazy:
             from dask import delayed
             from dask.array import from_delayed, stack
-            img_list = [from_delayed(delayed(self._get_image)(start=i*self.img_bytes + 8192), # Need to determine proper start
-                                     shape=(self.frame_width, self.frame_height),
-                                     dtype=np.uint32)
-                        for i in range(self.num_frames)]
-            d = stack(img_list, axis=-1)  # adding navigation axis
-            return d
+            val = delayed(self._get_image, pure=True)
+            data = from_delayed(val, shape=(self.frame_width, self.frame_height), dtype=np.uint16)
+        else:
+            data = self._get_image()
+            return data
 
 
 def file_reader(filename, record_by=None, order=None, lazy=False,

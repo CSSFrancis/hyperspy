@@ -22,9 +22,20 @@ class TestSEQReader:
         self.file0 = os.path.join(self.seq, 'test.seq')
         print(self.file0)
 
-    def test_load_seq(self):
+    def test_load_seq_lazy(self):
         s = load(self.file0, lazy=True)
-        
+        print(s)
+        print(s.axes_manager)
+        print(s.inav[0])
+
+    def test_load_seq(self):
+        s = load(self.file0, lazy=False)
+        print(s)
+        print(s.axes_manager)
+        print("The data is:", s.data)
+        s.plot()
+        plt.show()
+
     def test_load_image_content(self):
         # TEM image of the beam stop
         fname0 = os.path.join(self.dirpathold, '64x64_TEM_images_acquire.emi')
