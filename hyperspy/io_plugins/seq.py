@@ -31,7 +31,7 @@ import struct
 
 _logger = logging.getLogger(__name__)
 
-
+data_types = {8: np.uint8, 16: np.uint16, 32: np.uint32}  # Stream Pix data types
 class SeqReader(object):
     """ Class to read .seq files. File format from StreamPix and Output for Direct Electron Cameras
     """
@@ -47,6 +47,8 @@ class SeqReader(object):
         self.dark_ref = None
         self.gain_ref = None
         self.fps = None
+        self.bit_depth = None
+        self.image_dtype_list = None
 
     def _get_dark_ref(self):
         try:
@@ -69,12 +71,19 @@ class SeqReader(object):
 
     def parse_header(self):
         print(self.f)
+
         with open(self.f, mode='rb') as file:  # b is important -> binary
             file.seek(548)
-            read_bytes = file.read(20)
-            self.frame_width = struct.unpack('<L', read_bytes[0:4])[0]
-            self.frame_height = struct.unpack('<L', read_bytes[4:8])[0]
-            self.frame_length=self.frame_height*self.frame_width
+            image_info_dtype= [(("ImageWidth"),("<u4")),
+                               (("ImageHeight"), ("<u4")),
+                               (("ImageBitDepth"), ("<u4")),
+                               (("ImageBitDepthReal"), ("<u4"))]
+            image_info = np.fromfile(file, image_info_dtype, count=1)[0]
+            self.frame_width = image_info[0]
+            self.frame_height = image_info[1]
+            self.bit_depth = data_types[image_info[2]]  # image bit depth
+            self.bit_depth_real = image_info[3]  # actual recorded bit depth
+            self.frame_length = self.frame_height*self.frame_width
             _logger.info('Each frame is %i x %i pixels', (self.frame_width, self.frame_width))
             file.seek(572)
 
@@ -90,6 +99,7 @@ class SeqReader(object):
             read_bytes = file.read(8)
             self.fps = struct.unpack('<d', read_bytes)[0]
             _logger.info('Image acquired at %i frames per second', self.fps)
+
         return
 
     def parse_metadata(self):
@@ -137,25 +147,28 @@ class SeqReader(object):
 
     def _get_image(self):
         with open(self.f, mode='rb') as file:
-            data = np.empty(self.num_frames*self.frame_length, dtype=np.uint16)  # creating an empty array
+            dtype_list = [(("Array"), self.bit_depth, (self.frame_width, self.frame_height)),
+                          (("t_value"),("<u4")),
+                          (("Miliseconds"), ("<u2")),
+                          (("Microseconds"), ("<u2"))
+                          ]
+            data = np.empty(self.num_frames, dtype=dtype_list)  # creating an empty array
             file.seek(8192)
             for i in range(self.num_frames):
                 file.seek(8192+i*self.img_bytes)
                 if self.dark_ref is not None and self.gain_ref is not None:
-                    data[i] = (np.fromfile(file, np.uint16, count=1) - self.dark_ref) * self.gain_ref
+                    data[i] = (np.fromfile(file, dtype_list, count=1) - self.dark_ref) * self.gain_ref
                 else:
-                    data[i*self.frame_length:(i+1)*self.frame_length] = np.fromfile(file,
-                                                                                    np.uint16,
-                                                                                    count=self.frame_length)
-            data = data.reshape((self.frame_width,self.frame_height, self.num_frames))
-        return data
+                    data[i] = np.fromfile(file, dtype_list, count=1)
+        return data["Array"]
 
     def read_data(self, lazy=False):
         if lazy:
             from dask import delayed
             from dask.array import from_delayed
             val = delayed(self._get_image, pure=True)
-            data = from_delayed(val, shape=(self.frame_width, self.frame_height,self.num_frames), dtype=np.uint16)
+            dt =(("Array"), self.bit_depth, (self.frame_width, self.frame_height))
+            data = from_delayed(val, shape=self.num_frames, dtype=)
         else:
             data = self._get_image()
         return data
