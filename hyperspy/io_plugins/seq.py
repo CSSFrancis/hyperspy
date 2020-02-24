@@ -36,9 +36,6 @@ class SeqReader(object):
     """ Class to read .seq files. File format from StreamPix and Output for Direct Electron Cameras
     """
 
-    _complex_type = (15, 18, 20)
-    simple_type = (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
-
     def __init__(self, f):
         self.f = f
         self.metadata_dict = None
@@ -55,8 +52,7 @@ class SeqReader(object):
         try:
             with open (self.f+".dark.mrc") as dark_ref:
                 bytes = dark_ref.read(self.frame_width * self.frame_height * 4)
-                self.dark_ref = np.reshape(np.frombuffer(bytes, dtype=np.float32),
-                                           (self.frame_width,self.frame_height))
+                self.dark_ref = np.frombuffer(bytes, dtype=np.float32)
         except FileNotFoundError:
             print("No Dark Reference image found.  The Dark reference should be in the same directory "
                   "as the image and have the form testfile.seq.dark.mrc")
@@ -65,8 +61,8 @@ class SeqReader(object):
         try:
             with open (self.f+".gain.mrc") as dark_ref:
                 bytes = dark_ref.read(self.frame_width * self.frame_height * 4)
-                self.dark_ref = np.reshape(np.frombuffer(bytes, dtype=np.float32),
-                                           (self.frame_width, self.frame_height))  # 32 bit float image gain and dark
+                self.dark_ref = np.frombuffer(bytes, dtype=np.float32)  # 32 bit float image gain and dark
+                # Images kept in linear form.
         except FileNotFoundError:
             print("No gain Reference image found.  The Dark reference should be in the same directory "
                   "as the image and have the form testfile.seq.dark.mrc")
@@ -129,13 +125,13 @@ class SeqReader(object):
             'scale': 1,
             'size': self.num_frames,
             'navigate': True,
-            'index_in_array': -1})
+            'index_in_array': 2})
         try:
             with open(self.f+".metadata") as meta:
                 pass
         except FileNotFoundError:
-            print("No gain Reference image found.  The Dark reference should be in the same directory "
-                  "as the image and have the form testfile.seq.dark.mrc")
+            print("No Gain Reference image found.  The Gain reference should be in the same directory "
+                  "as the image and have the form testfile.seq.gain.mrc")
 
         return axes
 
@@ -148,35 +144,32 @@ class SeqReader(object):
                 if self.dark_ref is not None and self.gain_ref is not None:
                     data[i] = (np.fromfile(file, np.uint16, count=1) - self.dark_ref) * self.gain_ref
                 else:
-                    data[i*self.frame_length:(i+1)*self.frame_length] = np.fromfile(file, np.uint16, count=self.frame_length)
+                    data[i*self.frame_length:(i+1)*self.frame_length] = np.fromfile(file,
+                                                                                    np.uint16,
+                                                                                    count=self.frame_length)
+            data = data.reshape((self.frame_width,self.frame_height, self.num_frames))
         return data
 
     def read_data(self, lazy=False):
         if lazy:
             from dask import delayed
-            from dask.array import from_delayed, stack
+            from dask.array import from_delayed
             val = delayed(self._get_image, pure=True)
-            data = from_delayed(val, shape=(self.frame_width, self.frame_height), dtype=np.uint16)
+            data = from_delayed(val, shape=(self.frame_width, self.frame_height,self.num_frames), dtype=np.uint16)
         else:
             data = self._get_image()
-            return data
+        return data
 
 
-def file_reader(filename, record_by=None, order=None, lazy=False,
-                optimize=True):
-    """Reads a DM3 file and loads the data into the appropriate class.
-    data_id can be specified to load a given image within a DM3 file that
-    contains more than one dataset.
+def file_reader(filename, lazy=False):
+    """Reads a .seq file.
 
     Parameters
     ----------
-    record_by: Str
-        One of: SI, Signal2D
-    order : Str
-        One of 'C' or 'F'
+    filename: str
+        The filename to be loaded
     lazy : bool, default False
         Load the signal lazily.
-    %s
     """
     seq = SeqReader(filename)
     seq.parse_header()
@@ -185,7 +178,6 @@ def file_reader(filename, record_by=None, order=None, lazy=False,
     metadata = seq.parse_metadata()
     axes = seq.parse_axes()
     data = seq.read_data(lazy=lazy)
-    print(data)
     dictionary = {
         'data': data,
         'metadata': metadata,
@@ -193,5 +185,4 @@ def file_reader(filename, record_by=None, order=None, lazy=False,
         'original_metadata': metadata,}
 
     return [dictionary, ]
-    return
     file_reader.__doc__ %= (OPTIMIZE_ARG.replace('False', 'True'))

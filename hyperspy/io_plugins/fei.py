@@ -470,7 +470,6 @@ def convert_xml_to_dict(xml_object):
 def ser_reader(filename, objects=None, lazy=False, only_valid_data=False):
     """Reads the information from the file and returns it in the HyperSpy
     required format.
-
     """
     header, data = load_ser_file(filename)
     record_by = guess_record_by(header['DataTypeID'])
