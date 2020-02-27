@@ -21,18 +21,21 @@ class TestSEQReader(TestCase):
 
     def test_load_seq_lazy(self):
         s = load(self.file0, lazy=True)
-        print("the size is :", np.shape(s.inav[1].data.compute()))
-        print(s.axes_manager)
+        signal_shape = np.shape(s.inav[1].data.compute())
+        assert(signal_shape[0] == 128)
+        assert (signal_shape[1] == 128)
         s.plot()
-        plt.ion()
-        plt.show(block=False)
-        plt.draw()
         plt.show()
 
     def test_load_seq(self):
         s = load(self.file0, lazy=False)
-        print(np.shape(s.data))
-        print(np.shape(s.inav[1].data))
-        print(s.axes_manager)
+        signal_shape = np.shape(s.inav[1].data)
+        assert(signal_shape[0]==128)
+        assert (signal_shape[1] == 128)
         s.plot()
         plt.show()
+
+    def test_dark_and_gain(self):
+        s = load(self.file0, lazy=False)
+        
+
