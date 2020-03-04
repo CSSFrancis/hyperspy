@@ -42,38 +42,30 @@ class SeqReader(object):
         # The dark and gain references are saved as 32 bit floats. I can either change the image to 32 bit float
         # or change the dark and gain references to 16 bit int images.
         try:
-            with open (self.file + ".dark.mrc", mode='rb') as file:
+            with open(self.file + ".dark.mrc", mode='rb') as file:
                 file.seek(0)
                 read_bytes = file.read(8)
                 frame_width = struct.unpack('<i', read_bytes[0:4])[0]
                 frame_height = struct.unpack('<i', read_bytes[4:8])[0]
                 file.seek(256 * 4)
                 bytes = file.read(frame_width * frame_height * 4)
-                self.dark_ref = np.array(
-                    np.round(
-                        np.reshape(
-                            np.frombuffer(bytes, dtype=np.float32),(self.image_dict["ImageWidth"],
-                                                                    self.image_dict["ImageHeight"]))),
-                    dtype=self.image_dict["ImageBitDepth"])
+                self.dark_ref = np.reshape(np.frombuffer(bytes, dtype=np.float32), (frame_width, frame_height))
         except FileNotFoundError:
             print("No Dark Reference image found.  The Dark reference should be in the same directory "
                   "as the image and have the form xxx.seq.dark.mrc")
 
     def _get_gain_ref(self):
+        # I think that the dark and gain references are always saved as 32 bit floats but the should be somewhere in
+        # the header.  It says the file type is .mrc but I don't know if it actually is .mrc
         try:
-            with open (self.file+".gain.mrc", mode='rb') as file:
+            with open(self.file+".gain.mrc", mode='rb') as file:
                 file.seek(0)
                 read_bytes = file.read(8)
                 frame_width = struct.unpack('<i', read_bytes[0:4])[0]
                 frame_height = struct.unpack('<i', read_bytes[4:8])[0]
                 file.seek(256 * 4)
                 bytes = file.read(frame_width * frame_height * 4)
-                self.gain_ref = np.array(
-                    np.round(
-                        np.reshape(
-                            np.frombuffer(bytes, dtype=np.float32), (self.image_dict["ImageWidth"],
-                                                                     self.image_dict["ImageHeight"]))),
-                    dtype=self.image_dict["ImageBitDepth"])  # Casting to 16 bit ints
+                self.gain_ref = np.reshape(np.frombuffer(bytes, dtype=np.float32), (frame_width, frame_height))
         except FileNotFoundError:
             print("No gain reference image found.  The Gain reference should be in the same directory "
                   "as the image and have the form xxx.seq.gain.mrc")
@@ -116,13 +108,16 @@ class SeqReader(object):
                                     (("Magnification"), (np.float64)),
                                     (("PixelSize"), (np.float64)),
                                     (("CameraLength"), (np.float64)),
-                                    (("DiffPixelSize"), (np.float64))]
+                                    (("DiffPixelSize"), (np.float64)),
+                                    (("ScaleBarIntLength"), ("<i"))]
                 m = np.fromfile(meta, image_info_dtype, count=1)[0]
+                print(m)
                 self.metadata_dict["SensorGain"] = m[0]
                 self.metadata_dict["Magnification"] = m[1]
                 self.metadata_dict["PixelSize"] = m[2]
                 self.metadata_dict["CameraLength"] = m[3]
                 self.metadata_dict["DiffPixelSize"] = m[4]
+                meta.seek(364)
 
         except FileNotFoundError:
             print("No metadata file.  The metadata should be in the same directory "
@@ -131,7 +126,7 @@ class SeqReader(object):
 
     def create_axes(self):
         axes = []
-        axes.append({'name':'time', 'offset': 0, 'scale': 1,'size': self.image_dict["NumFrames"],
+        axes.append({'name': 'time', 'offset': 0, 'scale': 1, 'size': self.image_dict["NumFrames"],
                      'navigate': True, 'index_in_array': 0})
         axes.append({'name': 'ky', 'offset': 0, 'scale': 1, 'size': self.image_dict["ImageHeight"],
                      'navigate': False, 'index_in_array': 1})
@@ -142,6 +137,11 @@ class SeqReader(object):
             # need to still determine a way to properly set units and scale
             axes[1]['scale'] = self.metadata_dict["PixelSize"]
             axes[2]['scale'] = self.metadata_dict["PixelSize"]
+
+        if self.metadata_dict is not {} and self.metadata_dict["DiffPixelSize"] != 0:
+            # need to still determine a way to properly set units and scale
+            axes[1]['scale'] = self.metadata_dict["DiffPixelSize"]
+            axes[2]['scale'] = self.metadata_dict["DiffPixelSize"]
 
         axes[0]['scale'] = 1/self.image_dict["FPS"]
 
@@ -157,6 +157,8 @@ class SeqReader(object):
         return metadata
 
     def get_image_data(self):
+        # Currently changing the images from 16 bit integers to 32 bit floats because of the dark and gain reference
+        # correction. And then changes the images back.
         with open(self.file, mode='rb') as file:
             dtype_list = [(("Array"), self.image_dict["ImageBitDepth"],
                            (self.image_dict["ImageWidth"], self.image_dict["ImageHeight"]))]
@@ -167,10 +169,9 @@ class SeqReader(object):
                 file.seek(8192 + i * self.image_dict["ImgBytes"])
                 if self.dark_ref is not None and self.gain_ref is not None:
                     d = np.fromfile(file, dtype_list, count=1)
-                    d["Array"] = (d["Array"] - self.dark_ref)
-                    d["Array"][d["Array"] > max_pix] = 0
-                    d["Array"] = d["Array"] * self.gain_ref  # Numpy doesn't check for overflow.
-                    # There might be a better way to do this. OpenCV has a method for subtracting
+                    holder = d["Array"].astype(np.float32)-self.dark_ref
+                    holder[holder < 0] = 0
+                    d["Array"] = np.round((holder * self.gain_ref)).astype(np.int16)
                     data[i] = d
                 else:
                     data[i] = np.fromfile(file, dtype_list, count=1)
@@ -181,10 +182,8 @@ class SeqReader(object):
             from dask import delayed
             from dask.array import from_delayed
             val = delayed(self.get_image_data(), pure=True)
-            data = from_delayed(val, shape=(self.image_dict["NumFrames"],self.image_dict["ImageWidth"],
+            data = from_delayed(val, shape=(self.image_dict["NumFrames"], self.image_dict["ImageWidth"],
                                             self.image_dict["ImageHeight"]), dtype=self.image_dict["ImageBitDepth"])
-            #data = from_delayed(val, shape=(self.image_dict["NumFrames"],self.image_dict["ImageWidth"],
-             #                               self.image_dict["ImageHeight"]), dtype=self.image_dict["ImageBitDepth"])
         else:
             data = self.get_image_data()
         return data
