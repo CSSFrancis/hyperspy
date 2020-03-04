@@ -37,5 +37,5 @@ class TestSEQReader(TestCase):
 
     def test_dark_and_gain(self):
         s = load(self.file0, lazy=False)
-        
+
 
