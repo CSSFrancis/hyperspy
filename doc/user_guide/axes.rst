@@ -10,7 +10,7 @@ functions operate on the *signal* axes and iterate over the *navigation* axes.
 Take an EELS spectrum image as specific example. It is a 2D array of spectra
 and has three dimensions: X, Y and energy-loss. In HyperSpy, X and Y are the
 *navigation* dimensions and the energy-loss is the *signal* dimension. To make
-this distinction more explicit, the representation of the object includes a 
+this distinction more explicit, the representation of the object includes a
 separator ``|`` between the navigation and signal dimensions. In analogy, the
 *signal* dimension in EDX would be the X-ray energy, in optical spectra the
 wavelength axis, etc. However, HyperSpy can also handle data with more than one
@@ -55,7 +55,7 @@ Setting axis properties
 The axes are managed and stored by the :py:class:`~.axes.AxesManager` class
 that is stored in the :py:attr:`~.signal.BaseSignal.axes_manager` attribute of
 the signal class. The individual axes can be accessed by indexing the
-AxesManager, e.g.:
+:py:class:`~.axes.AxesManager`, e.g.:
 
 .. code-block:: python
 
@@ -68,7 +68,7 @@ AxesManager, e.g.:
     >>> s.axes_manager[0]
     <Unnamed 0th axis, size: 20, index: 0>
 
-The navigation axes come first, followed by the signal axes. Alternatively, 
+The navigation axes come first, followed by the signal axes. Alternatively,
 it is possible to selectively access the navigation or signal dimensions:
 
 .. code-block:: python
@@ -189,10 +189,10 @@ Types of data axes
 ------------------
 
 HyperSpy supports different *data axis types*, which differ in how the axis is
-defined: 
+defined:
 
-* :py:class:`~.axes.DataAxis` defined by an array ``axis``, 
-* :py:class:`~.axes.FunctionalDataAxis` defined by a function ``expression`` or 
+* :py:class:`~.axes.DataAxis` defined by an array ``axis``,
+* :py:class:`~.axes.FunctionalDataAxis` defined by a function ``expression`` or
 * :py:class:`~.axes.UniformDataAxis` defined by the initial value ``offset``
   and spacing ``scale``.
 
@@ -202,7 +202,7 @@ axis is **uniform**, where the data points are equidistantly spaced, or
 when, e.g., a spectrum recorded over a *wavelength* axis is converted to a
 *wavenumber* or *energy* scale, where the conversion is based on a ``1/x``
 dependence so that the axis spacing of the new axis varies along the length
-of the axis. Whether an axis is uniform or not can be queried through the 
+of the axis. Whether an axis is uniform or not can be queried through the
 property ``is_uniform`` (bool) of the axis.
 
 Every axis of a signal object may be of a different type. For example, it is
@@ -223,11 +223,18 @@ following table.
     |           :py:class:`~.axes.FunctionalDataAxis`                   |      expression        |  False      |
     +-------------------------------------------------------------------+------------------------+-------------+
     |             :py:class:`~.axes.UniformDataAxis`                    |    offset, scale       |  True       |
-    +-------------------------------------------------------------------+------------------------+-------------+    
+    +-------------------------------------------------------------------+------------------------+-------------+
 
 .. NOTE::
 
     Not all features are implemented for non-uniform axes.
+
+
+.. warning::
+
+    Non-uniform axes are in beta state and its API may change in a minor release.
+    Not all hyperspy features are compatible with non-uniform axes and support
+    will be added in future releases.
 
 
 Uniform data axis
@@ -264,7 +271,7 @@ Corresponding output of :py:class:`~.axes.AxesManager`:
                 Name |   size |  offset |   scale |  units
     ================ | ====== | ======= | ======= | ======
     ---------------- | ------ | ------- | ------- | ------
-                     |    500 |     300 |       1 |       
+                     |    500 |     300 |       1 |
 
 
 Functional data axis
@@ -279,7 +286,7 @@ expression, in this case ``a`` and ``b`` must be defined as additional
 attributes of the axis. The property ``is_uniform`` is automatically set to
 ``False``.
 
-``x`` itself is an instance of :py:class:`~.axes.BaseDataAxis`. By default, 
+``x`` itself is an instance of :py:class:`~.axes.BaseDataAxis`. By default,
 it will be a :py:class:`~.axes.UniformDataAxis` with ``offset = 0`` and
 ``scale = 1`` of the given ``size``. However, it can also be initialized with
 custom ``offset`` and ``scale`` values. Alternatively, it can be a non
@@ -317,7 +324,7 @@ Corresponding output of :py:class:`~.axes.AxesManager`:
                 Name |   size |           offset |            scale |  units
     ================ | ====== | ================ | ================ | ======
     ---------------- | ------ | ---------------- | ---------------- | ------
-                     |    500 | non-uniform axis | non-uniform axis |       
+                     |    500 | non-uniform axis | non-uniform axis |
 
 
 Initializing ``x`` with ``offset`` and ``scale``:
@@ -385,7 +392,7 @@ Corresponding output of :py:class:`~.axes.AxesManager`:
                 Name |   size |           offset |            scale |  units
     ================ | ====== | ================ | ================ | ======
     ---------------- | ------ | ---------------- | ---------------- | ------
-                     |     12 | non-uniform axis | non-uniform axis |       
+                     |     12 | non-uniform axis | non-uniform axis |
 
 
 Defining a new axis
@@ -400,7 +407,7 @@ automatically determines the type of axis by the given attributes:
     >>> axis = axes.create_axis(offset=10,scale=0.5,size=20)
     >>> axis
     <Unnamed axis, size: 20>
-    
+
 Alternatively, the creator of the different types of axes can be called
 directly:
 
@@ -410,7 +417,7 @@ directly:
     >>> axis = axes.UniformDataAxis(offset=10,scale=0.5,size=20)
     >>> axis
     <Unnamed axis, size: 20>
-    
+
 The dictionary defining the axis is returned by the ``get_axis_dictionary()``
 method:
 
@@ -432,16 +439,16 @@ signal<signal_initialization>`.
 Adding/Removing axes to/from a signal
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Usually, the axes are directly added to a signal during :ref:`signal 
+Usually, the axes are directly added to a signal during :ref:`signal
 initialization<signal_initialization>`. However, you may wish to add/remove
-axes from the `AxesManager` of a signal.
+axes from the :py:class:`~.axes.AxesManager` of a signal.
 
 Note that there is currently no consistency check whether a signal object has
 the right number of axes of the right dimensions. Most functions will however
-fail if you pass a signal object where the axes do not match the data 
+fail if you pass a signal object where the axes do not match the data
 dimensions and shape.
 
-You can *add a set of axes* to the `AxesManager` by passing either a list of
+You can *add a set of axes* to the :py:class:`~.axes.AxesManager` by passing either a list of
 axes dictionaries to ``axes_manager.create_axes()``:
 
 .. code-block:: python
@@ -459,7 +466,7 @@ or a list of axes objects:
     >>> axis1 = DataAxis(axis=np.arange(12)**2)
     >>> s.axes_manager.create_axes([axis0,axis1])
 
-*Remove an axis* from the `AxesManager` using ``remove()``, e.g. for the last axis:
+*Remove an axis* from the :py:class:`~.axes.AxesManager` using ``remove()``, e.g. for the last axis:
 
 .. code-block:: python
 
@@ -482,15 +489,15 @@ can be set and retrieved as quantity.
     >>> s.axes_manager[0].scale_as_quantity = '2.5 µm'
     >>> s.axes_manager
     <Axes manager, axes: (|10)>
-                Name |   size |  index |  offset |   scale |  units 
-    ================ | ====== | ====== | ======= | ======= | ====== 
-    ---------------- | ------ | ------ | ------- | ------- | ------ 
+                Name |   size |  index |  offset |   scale |  units
+    ================ | ====== | ====== | ======= | ======= | ======
+    ---------------- | ------ | ------ | ------- | ------- | ------
          <undefined> |     10 |        |       0 |     2.5 |     µm
     >>> s.axes_manager[0].offset_as_quantity = '2.5 nm'
     <Axes manager, axes: (|10)>
-                Name |   size |  index |  offset |   scale |  units 
-    ================ | ====== | ====== | ======= | ======= | ====== 
-    ---------------- | ------ | ------ | ------- | ------- | ------ 
+                Name |   size |  index |  offset |   scale |  units
+    ================ | ====== | ====== | ======= | ======= | ======
+    ---------------- | ------ | ------ | ------- | ------- | ------
          <undefined> |     10 |        |     2.5 | 2.5e+03 |     nm
 
 
@@ -586,7 +593,12 @@ fast.
 
 Iterating over the AxesManager
 ------------------------------
-One can iterate over the AxesManager to produce indices to the navigation axes. Each iteration will yield a new tuple of indices, sorted according to the iteration path specified in :py:attr:`~.axes.AxesManager.iterpath`. Setting the :py:attr:`~.axes.AxesManager.indices` property to a new index will update the accompanying signal so that signal methods that operate at a specific navigation index will now use that index, like ``s.plot()``.
+One can iterate over the :py:class:`~.axes.AxesManager` to produce indices to
+the navigation axes. Each iteration will yield a new tuple of indices, sorted
+according to the iteration path specified in :py:attr:`~.axes.AxesManager.iterpath`.
+Setting the :py:attr:`~.axes.AxesManager.indices` property to a new index will
+update the accompanying signal so that signal methods that operate at a specific
+navigation index will now use that index, like ``s.plot()``.
 
 .. code-block:: python
 
@@ -604,7 +616,16 @@ One can iterate over the AxesManager to produce indices to the navigation axes. 
     (2, 1)
 
 
-The ``AxesManager.iterpath`` specifies the strategy that the AxesManager should use to iterate over the navigation axes. Two built-in strategies exist: ``'flyback'`` and ``'serpentine'``. The flyback strategy starts at (0,0), continues down the row until the final column, "flies back" to the first column, and continues from (1,0). The serpentine strategy begins the same way, but when it reaches the final column (of index N), it continues from (1, N) along the next row, in the same way that a snake might slither, left and right.
+The :py:attr:`~.axes.AxesManager.iterpath` attribute specifies the strategy that
+the :py:class:`~.axes.AxesManager` should use to iterate over the navigation axes.
+Two built-in strategies exist:
+
+- ``'flyback'``: starts at (0, 0), continues down the row until the final
+  column, "flies back" to the first column, and continues from (1, 0)
+- ``'serpentine'``: starts at (0, 0), but when it reaches the final column
+  (of index N), it continues from (1, N) along the next row, in the same way
+  that a snake might slither, left and right.
+
 
 .. code-block:: python
 
@@ -613,7 +634,21 @@ The ``AxesManager.iterpath`` specifies the strategy that the AxesManager should 
     >>> for index in s.axes_manager:
     ...     print(index)
 
-The iterpath can also be set to be a specific list of indices, like [(0,0), (0,1)], but can also be any generator of indices. Storing a high-dimensional set of indices as a list or array can take a significant amount of memory. By using a generator instead, one almost entirely removes such a memory footprint:
+The :py:attr:`~.axes.AxesManager.iterpath` can also be set using the
+:py:meth:`~.axes.AxesManager.switch_iterpath` context manager:
+
+.. code-block:: python
+
+    >>> s = hs.signals.Signal1D(np.zeros((2,3,10)))
+    >>> with s.axes_manager.switch_iterpath('serpentine'):
+    >>>     for index in s.axes_manager:
+    ...         print(index)
+
+
+The :py:attr:`~.axes.AxesManager.iterpath` can also be set to be a specific list of indices, like [(0,0), (0,1)],
+but can also be any generator of indices. Storing a high-dimensional set of
+indices as a list or array can take a significant amount of memory. By using a
+generator instead, one almost entirely removes such a memory footprint:
 
 .. code-block:: python
 
@@ -640,10 +675,14 @@ The iterpath can also be set to be a specific list of indices, like [(0,0), (0,1
     (0, 0)
 
 
-Since generators do not have a defined length, and does not need to include all navigation indices, a progressbar will be unable to determine how long it needs to be. To resolve this, a helper class can be imported that takes both a generator and a manually specified length as inputs:
+Since generators do not have a defined length, and does not need to include all
+navigation indices, a progressbar will be unable to determine how long it needs
+to be. To resolve this, a helper class can be imported that takes both a generator
+and a manually specified length as inputs:
 
 .. code-block:: python
 
->>> from hyperspy.axes import GeneratorLen
->>> gen = GeneratorLen(reverse_flyback_generator(), 6)
->>> s.axes_manager.iterpath = gen
+    >>> from hyperspy.axes import GeneratorLen
+    >>> gen = GeneratorLen(reverse_flyback_generator(), 6)
+    >>> s.axes_manager.iterpath = gen
+

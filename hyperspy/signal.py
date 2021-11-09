@@ -16,22 +16,24 @@
 # You should have received a copy of the GNU General Public License
 # along with  HyperSpy.  If not, see <http://www.gnu.org/licenses/>.
 
+from collections.abc import MutableMapping
 import copy
-import warnings
-import inspect
 from contextlib import contextmanager
 from datetime import datetime
+import inspect
+from itertools import product
 import logging
-from pint import UnitRegistry, UndefinedUnitError
+import numbers
 from pathlib import Path
+import warnings
 
-import numpy as np
-from scipy import integrate
-from scipy import signal as sp_signal
 import dask.array as da
 from matplotlib import pyplot as plt
+import numpy as np
+from pint import UnitRegistry, UndefinedUnitError
+from scipy import integrate
+from scipy import signal as sp_signal
 import traits.api as t
-import numbers
 
 from hyperspy.axes import AxesManager
 from hyperspy import io
@@ -117,7 +119,6 @@ class ModelManager(object):
 
     def _save(self, name, dictionary):
 
-        from itertools import product
         _abc = 'abcdefghijklmnopqrstuvwxyz'
 
         def get_letter(models):
@@ -2622,6 +2623,11 @@ class BaseSignal(FancySlicing,
             else:
                 navigator = "slider"
         if axes_manager.signal_dimension == 0:
+            if axes_manager.navigation_dimension == 0:
+                # 0d signal without navigation axis: don't make a figure
+                # and instead, we display the value
+                print(self.data)
+                return
             self._plot = mpl_he.MPL_HyperExplorer()
         elif axes_manager.signal_dimension == 1:
             # Hyperspectrum
@@ -2771,8 +2777,7 @@ class BaseSignal(FancySlicing,
     plot.__doc__ %= (BASE_PLOT_DOCSTRING, BASE_PLOT_DOCSTRING_PARAMETERS,
                      PLOT1D_DOCSTRING, PLOT2D_KWARGS_DOCSTRING)
 
-    def save(self, filename=None, overwrite=None, extension=None,
-             **kwds):
+    def save(self, filename=None, overwrite=None, extension=None, **kwds):
         """Saves the signal in the specified format.
 
         The function gets the format from the specified extension (see
@@ -2835,6 +2840,13 @@ class BaseSignal(FancySlicing,
             Nexus file only. Define the default dataset in the file.
             If set to True the signal or first signal in the list of signals
             will be defined as the default (following Nexus v3 data rules).
+        write_dataset : bool, optional
+            Only for hspy files. If True, write the dataset, otherwise, don't
+            write it. Useful to save attributes without having to write the
+            whole dataset. Default is True.
+        close_file : bool, optional
+            Only for hdf5-based files and some zarr store. Close the file after
+            writing. Default is True.
 
         """
         if filename is None:
@@ -2851,9 +2863,10 @@ class BaseSignal(FancySlicing,
             else:
                 raise ValueError('File name not defined')
 
-        filename = Path(filename)
-        if extension is not None:
-            filename = filename.with_suffix(f".{extension}")
+        if not isinstance(filename, MutableMapping):
+            filename = Path(filename)
+            if extension is not None:
+                filename = filename.with_suffix(f".{extension}")
         io.save(filename, self, overwrite=overwrite, **kwds)
 
     def _replot(self):
@@ -3496,37 +3509,33 @@ class BaseSignal(FancySlicing,
                          "for more information.".format(self))
             self.data = np.ascontiguousarray(self.data)
 
-    def _iterate_signal(self):
-        """Iterates over the signal data.
+    def _iterate_signal(self, iterpath=None):
+        """Iterates over the signal data. It is faster than using the signal
+        iterator, because it avoids making deepcopy of metadata and other
+        attributes.
 
-        It is faster than using the signal iterator.
+        Parameters
+        ----------
+        iterpath : None or str or iterable
+            Any valid iterpath supported by the axes_manager.
 
+        Returns
+        -------
+        numpy array when iterating over the navigation space
         """
-        if self.axes_manager.navigation_size < 2:
-            yield self()
-            return
-        self._make_sure_data_is_contiguous()
-        axes = [axis.index_in_array for
-                axis in self.axes_manager.signal_axes]
-        if axes:
-            unfolded_axis = (
-                self.axes_manager.navigation_axes[0].index_in_array)
-            new_shape = [1] * len(self.data.shape)
-            for axis in axes:
-                new_shape[axis] = self.data.shape[axis]
-            new_shape[unfolded_axis] = -1
-        else:  # signal_dimension == 0
-            new_shape = (-1, 1)
-            axes = [1]
-            unfolded_axis = 0
-        # Warning! if the data is not contigous it will make a copy!!
-        data = self.data.reshape(new_shape)
-        getitem = [0] * len(data.shape)
-        for axis in axes:
-            getitem[axis] = slice(None)
-        for i in range(data.shape[unfolded_axis]):
-            getitem[unfolded_axis] = i
-            yield(data[tuple(getitem)])
+        original_index = self.axes_manager.indices
+
+        if iterpath is None:
+            _logger.warning('The default iterpath will change in HyperSpy 2.0.')
+
+        with self.axes_manager.switch_iterpath(iterpath):
+            self.axes_manager.indices = tuple(
+                [0 for _ in self.axes_manager.navigation_axes]
+                )
+            for _ in self.axes_manager:
+                yield self()
+            # restore original index
+            self.axes_manager.indices = original_index
 
     def _cycle_signal(self):
         """Cycles over the signal data.
@@ -5787,7 +5796,7 @@ class BaseSignal(FancySlicing,
                 raise ValueError("Markers can not be added to several signals")
             m._plot_on_signal = plot_on_signal
             if plot_marker:
-                if self._plot is None:
+                if self._plot is None or not self._plot.is_active:
                     self.plot()
                 if m._plot_on_signal:
                     self._plot.signal_plot.add_marker(m)

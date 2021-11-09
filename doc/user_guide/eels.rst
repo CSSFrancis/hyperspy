@@ -75,13 +75,13 @@ more information about the edges.
     +-------+-------------------+-----------+-----------------------------+
 
 The method :py:meth:`~._signals.eels.EELSSpectrum.edges_at_energy` allows
-inspecting different sections of the signal for interactive edge 
-identification (the default). A region can be selected by dragging the mouse 
-across the signal and after clicking the `Update` button, edges with onset 
-energies within the selected energy range will be displayed. By toggling the 
-edge buttons, it will put or remove the corresponding edges on the signal. When 
-the `Complementary edge` box is ticked, edges outside the selected range with 
-the same element of edges within the selected energy range will be shown as well 
+inspecting different sections of the signal for interactive edge
+identification (the default). A region can be selected by dragging the mouse
+across the signal and after clicking the `Update` button, edges with onset
+energies within the selected energy range will be displayed. By toggling the
+edge buttons, it will put or remove the corresponding edges on the signal. When
+the `Complementary edge` box is ticked, edges outside the selected range with
+the same element of edges within the selected energy range will be shown as well
 to aid identification of edges.
 
 .. code-block:: python
@@ -94,7 +94,7 @@ to aid identification of edges.
    :width:   500
 
    Labels of edges can be put or remove by toggling the edge buttons.
-    
+
 
 .. _eels_thickness-label:
 
@@ -200,12 +200,11 @@ Load the core-loss and low-loss spectra
     ...                         spectrum_type="lowloss")[0]
 
 
-Set some important experimental information that is missing from the original
-core-loss file
+Set some important experimental information, the beam energy and experimental angles :
 
 .. code-block:: python
 
-    >>> s.set_microscope_parameters(beam_energy=100,
+    >>> s.set_microscope_parameters(beam_energy=300,
     ...                             convergence_angle=0.2,
     ...                             collection_angle=2.55)
 
@@ -221,6 +220,8 @@ Define the chemical composition of the sample
 
     >>> s.add_elements(('B', 'N'))
 
+It is worth noting that in this case the experimental parameters and the list of elements are actually automatically imported from the EELS Data Base.
+However, with real life data, these must often be added by hand.
 
 In order to include the effect of plural scattering, the model is convolved with the loss loss spectrum in which case the low loss spectrum needs to be provided to :py:meth:`~._signals.eels.EELSSpectrum.create_model`:
 
@@ -259,8 +260,9 @@ We must enable them to accurately fit this spectrum.
     >>> m.enable_fine_structure()
 
 
-We use smart_fit instead of standard fit method because smart_fit is optimized
-to fit EELS core-loss spectra
+We use :py:meth:`~.models.eelsmodel.EELSModel.smart_fit` instead of standard
+fit method because :py:meth:`~.models.eelsmodel.EELSModel.smart_fit` is
+optimized to fit EELS core-loss spectra
 
 .. code-block:: python
 
@@ -276,12 +278,15 @@ image
 
 .. NOTE::
 
-    `m.smart_fit()` and `m.multifit(kind='smart')` are methods specific to the EELS model.
-    The fitting procedure acts in iterative manner along the energy-loss-axis.
-    First it fits only the background up to the first edge. It continues by deactivating all edges except the first one, then performs the fit.
-    Then it only activates the the first two, fits, and repeats this until all edges are fitted simultanously.
+    `m.smart_fit()` and `m.multifit(kind='smart')` are methods specific to the
+    EELS model. The fitting procedure acts in iterative manner along the
+    energy-loss-axis. First it fits only the background up to the first edge.
+    It continues by deactivating all edges except the first one, then performs
+    the fit. Then it only activates the the first two, fits, and repeats this
+    until all edges are fitted simultanously.
 
-    Other, non-EELSCLEdge components, are never deactivated, and fitted on every iteration.
+    Other, non-EELSCLEdge components, are never deactivated, and fitted on every
+    iteration.
 
 Print the result of the fit
 

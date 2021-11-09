@@ -41,11 +41,8 @@ def get_low_loss_eels_signal(add_noise=True, random_state=None):
     Parameters
     ----------
     %s
-    %s
 
-    Returns
-    -------
-    artificial_low_loss_signal : :py:class:`~hyperspy._signals.eels.EELSSpectrum`
+    %s
 
     Example
     -------
@@ -84,7 +81,8 @@ get_low_loss_eels_signal.__doc__ %= (ADD_NOISE_DOCSTRING,
                                      RETURNS_DOCSTRING)
 
 
-def get_core_loss_eels_signal(add_powerlaw=False, add_noise=True, random_state=None):
+def get_core_loss_eels_signal(add_powerlaw=False, add_noise=True,
+                              random_state=None):
     """Get an artificial core loss electron energy loss spectrum.
 
     Similar to a Mn-L32 edge from a perovskite oxide.
@@ -209,7 +207,8 @@ get_low_loss_eels_line_scan_signal.__doc__ %= (ADD_NOISE_DOCSTRING,
                                                RETURNS_DOCSTRING)
 
 
-def get_core_loss_eels_line_scan_signal(add_powerlaw=False, add_noise=True, random_state=None):
+def get_core_loss_eels_line_scan_signal(add_powerlaw=False, add_noise=True,
+                                        random_state=None):
     """Get an artificial core loss electron energy loss line scan spectrum.
 
     Similar to a Mn-L32 and Fe-L32 edge from a perovskite oxide.
@@ -279,7 +278,8 @@ get_core_loss_eels_line_scan_signal.__doc__ %= (ADD_POWERLAW_DOCSTRING,
                                                 RETURNS_DOCSTRING)
 
 
-def get_core_loss_eels_model(add_powerlaw=False, add_noise=True, random_state=None):
+def get_core_loss_eels_model(add_powerlaw=False, add_noise=True,
+                             random_state=None):
     """Get an artificial core loss electron energy loss model.
 
     Similar to a Mn-L32 edge from a perovskite oxide.
@@ -352,59 +352,57 @@ def get_luminescence_signal(navigation_dimension=0,
                             add_noise=True,
                             random_state=None):
     """Get an artificial luminescence signal in wavelength scale (nm, uniform) or
-        energy scale (eV, non-uniform), simulating luminescence data recorded with a
-        diffracting spectrometer. Some random noise is also added to the spectrum,
-        to simulate experimental noise.
+    energy scale (eV, non-uniform), simulating luminescence data recorded with a
+    diffracting spectrometer. Some random noise is also added to the spectrum,
+    to simulate experimental noise.
 
-        Parameters
-        ----------
-        navigation_dimension: positive int.
-            The navigation dimension(s) of the signal. 0 = single spectrum,
-            1 = linescan, 2 = spectral map etc...
-        uniform: bool.
-            return uniform (wavelength) or non-uniform (energy) spectrum
-        add_baseline : bool
-                If true, adds a constant baseline to the spectrum. Conversion to
-                energy representation will turn the constant baseline into inverse
-                powerlaw.
-        %s
-        random_state: None or int
-            initialise state of the random number generator
+    Parameters
+    ----------
+    navigation_dimension: positive int.
+        The navigation dimension(s) of the signal. 0 = single spectrum,
+        1 = linescan, 2 = spectral map etc...
+    uniform: bool.
+        return uniform (wavelength) or non-uniform (energy) spectrum
+    add_baseline : bool
+        If true, adds a constant baseline to the spectrum. Conversion to
+        energy representation will turn the constant baseline into inverse
+        powerlaw.
+    %s
 
-        Example
-        -------
-        >>> import hyperspy.datasets.artificial_data as ad
-        >>> s = ad.get_luminescence_signal()
-        >>> s.plot()
+    Example
+    -------
+    >>> import hyperspy.datasets.artificial_data as ad
+    >>> s = ad.get_luminescence_signal()
+    >>> s.plot()
 
-        With constant baseline
+    With constant baseline
 
-        >>> s = ad.get_luminescence_signal(uniform=True, add_baseline=True)
-        >>> s.plot()
+    >>> s = ad.get_luminescence_signal(uniform=True, add_baseline=True)
+    >>> s.plot()
 
-        To make the noise the same for multiple spectra, which can
-        be useful for testing fitting routines
+    To make the noise the same for multiple spectra, which can
+    be useful for testing fitting routines
 
-        >>> s1 = ad.get_luminescence_signal(random_state=10)
-        >>> s2 = ad.get_luminescence_signal(random_state=10)
-        >>> (s1.data == s2.data).all()
-        True
+    >>> s1 = ad.get_luminescence_signal(random_state=10)
+    >>> s2 = ad.get_luminescence_signal(random_state=10)
+    >>> (s1.data == s2.data).all()
+    True
 
-        2D map
+    2D map
 
-        >>> s = ad.get_luminescence_signal(navigation_dimension=2)
-        >>> s.plot()
+    >>> s = ad.get_luminescence_signal(navigation_dimension=2)
+    >>> s.plot()
 
-        See also
-        --------
-        get_low_loss_eels_signal,
-        get_core_loss_eels_signal,
-        get_low_loss_eels_line_scan_signal,
-        get_core_loss_eels_line_scan_signal,
-        get_core_loss_eels_model,
-        get_atomic_resolution_tem_signal2d,
+    See also
+    --------
+    get_low_loss_eels_signal,
+    get_core_loss_eels_signal,
+    get_low_loss_eels_line_scan_signal,
+    get_core_loss_eels_line_scan_signal,
+    get_core_loss_eels_model,
+    get_atomic_resolution_tem_signal2d,
 
-        """
+    """
 
     #Initialisation of random number generator
     random_state = check_random_state(random_state)

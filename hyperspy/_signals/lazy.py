@@ -26,8 +26,7 @@ import dask.delayed as dd
 import dask
 from dask.diagnostics import ProgressBar
 from itertools import product
-from distutils.version import LooseVersion
-
+from packaging.version import Version
 
 from hyperspy.signal import BaseSignal
 from hyperspy.defaults_parser import preferences
@@ -168,13 +167,21 @@ class LazySignal(BaseSignal):
                                                                   **kwargs)
                                                 )
 
-
     def close_file(self):
         """Closes the associated data file if any.
 
         Currently it only supports closing the file associated with a dask
         array created from an h5py DataSet (default HyperSpy hdf5 reader).
 
+        """
+        try:
+            self._get_file_handle().close()
+        except AttributeError:
+            _logger.warning("Failed to close lazy signal file")
+
+    def _get_file_handle(self, warn=True):
+        """Return file handle when possible; currently only hdf5 file are
+        supported.
         """
         arrkey = None
         for key in self.data.dask.keys():
@@ -183,9 +190,12 @@ class LazySignal(BaseSignal):
                 break
         if arrkey:
             try:
-                self.data.dask[arrkey].file.close()
-            except AttributeError:
-                _logger.exception("Failed to close lazy Signal file")
+                return self.data.dask[arrkey].file
+            except (AttributeError, ValueError):
+                if warn:
+                    _logger.warning("Failed to retrieve file handle, either "
+                                    "the file is already closed or it is not "
+                                    "an hdf5 file.")
 
     def _get_dask_chunks(self, axis=None, dtype=None):
         """Returns dask chunks.
@@ -643,7 +653,7 @@ class LazySignal(BaseSignal):
             axes_changed = True
             if len(output_signal_size) != len(old_sig.axes_manager.signal_shape):
                 drop_axis = old_sig.axes_manager.signal_indices_in_array
-                new_axis = tuple(range(len(output_signal_size)))
+                new_axis = tuple(range(len(nav_indexes), len(nav_indexes) + len(output_signal_size)))
             else:
                 drop_axis = [it for (o, i, it) in zip(output_signal_size,
                                                       old_sig.axes_manager.signal_shape,
@@ -685,22 +695,6 @@ class LazySignal(BaseSignal):
         if not ragged:
             sig.get_dimensions_from_data()
         return sig
-
-    def _iterate_signal(self):
-        if self.axes_manager.navigation_size < 2:
-            yield self()
-            return
-        nav_dim = self.axes_manager.navigation_dimension
-        sig_dim = self.axes_manager.signal_dimension
-        nav_indices = self.axes_manager.navigation_indices_in_array[::-1]
-        nav_lengths = np.atleast_1d(
-            np.array(self.data.shape)[list(nav_indices)])
-        getitem = [slice(None)] * (nav_dim + sig_dim)
-        data = self._lazy_data()
-        for indices in product(*[range(l) for l in nav_lengths]):
-            for res, ind in zip(indices, nav_indices):
-                getitem[ind] = res
-            yield data[tuple(getitem)]
 
     def _block_iterator(self,
                         flat_signal=True,
@@ -1181,7 +1175,7 @@ class LazySignal(BaseSignal):
             # Needs to reverse the chunks list to match dask chunking order
             signal_chunks = list(signal_chunks)[::-1]
             navigation_chunks = ['auto'] * len(self.axes_manager.navigation_shape)
-            if LooseVersion(dask.__version__) >= LooseVersion("2.30.0"):
+            if Version(dask.__version__) >= Version("2.30.0"):
                 kwargs = {'balance':True}
             else:
                 kwargs = {}
