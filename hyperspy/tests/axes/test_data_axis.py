@@ -27,7 +27,7 @@ import traits.api as t
 import pytest
 
 from hyperspy.axes import (BaseDataAxis, DataAxis, FunctionalDataAxis,
-                           UniformDataAxis, create_axis)
+                           UniformDataAxis, create_axis, VectorDataAxis)
 from hyperspy.signals import Signal1D
 from hyperspy.misc.test_utils import assert_deep_almost_equal
 
@@ -746,6 +746,26 @@ class TestUniformDataAxisValueRangeToIndicesNegativeScale:
             self.axis.value_range_to_indices(1, 2)
 
 
+class TestVectorDataAxis:
+    def setup_method(self, method):
+        self.axis = VectorDataAxis(size=10,scale=-0.1, offset=10)
+
+    def test_value_range_to_indices_in_range(self):
+        assert self.axis.value_range_to_indices(9.9, 9.2) == (1, 8)
+
+    def test_value_range_to_indices_endpoints(self):
+        assert self.axis.value_range_to_indices(10, 9.1) == (0, 9)
+
+    def test_value_range_to_indices_out(self):
+        assert self.axis.value_range_to_indices(11, 9) == (0, 9)
+
+    def test_value_range_to_indices_None(self):
+        assert self.axis.value_range_to_indices(None, None) == (0, 9)
+
+    def test_value_range_to_indices_v1_greater_than_v2(self):
+        with pytest.raises(ValueError):
+            self.axis.value_range_to_indices(1, 2)
+
 def test_rounding_consistency_axis_type():
     scales = [0.1, -0.1, 0.1, -0.1]
     offsets = [-11.0, -10.9, 10.9, 11.0]
@@ -773,3 +793,5 @@ def test_rounding_consistency_axis_type_half(shift):
     nuaxis_indices = super(type(axis), axis).value2index(test_vals)
 
     np.testing.assert_allclose(uaxis_indices, nuaxis_indices)
+
+

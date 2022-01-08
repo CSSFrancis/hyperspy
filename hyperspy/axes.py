@@ -721,6 +721,7 @@ class BaseDataAxis(t.HasTraits):
         self.__init__(**d, size=self.size, scale=scale, offset=self.low_value)
         self.axes_manager = axes_manager
 
+
     @property
     def _is_increasing_order(self):
         """
@@ -786,6 +787,47 @@ class DataAxis(BaseDataAxis):
             **kwargs)
         self.axis = axis
         self.update_axis()
+
+    def value_range_to_indices(self, v1, v2):
+        """Convert the given range to index range.
+
+        When a value is out of the axis limits, the endpoint is used instead.
+        `v1` must be preceding `v2` in the axis values
+
+          - if the axis scale is positive, it means v1 < v2
+          - if the axis scale is negative, it means v1 > v2
+
+        Parameters
+        ----------
+        v1, v2 : float
+            The end points of the interval in the axis units.
+
+        Returns
+        -------
+        i2, i2 : float
+            The indices corresponding to the interval [v1, v2]
+        """
+        i1, i2 = 0, self.size - 1
+        error_message = "Wrong order of the values: for axis with"
+        if self._is_increasing_order:
+            if v1 is not None and v2 is not None and v1 > v2:
+                raise ValueError(f"{error_message} increasing order, v2 ({v2}) "
+                                 f"must be greater than v1 ({v1}).")
+
+            if v1 is not None and self.low_value < v1 <= self.high_value:
+                i1 = self.value2index(v1)
+            if v2 is not None and self.high_value > v2 >= self.low_value:
+                i2 = self.value2index(v2)
+        else:
+            if v1 is not None and v2 is not None and v1 < v2:
+                raise ValueError(f"{error_message} decreasing order: v1 ({v1}) "
+                                 f"must be greater than v2 ({v2}).")
+
+            if v1 is not None and self.high_value > v1 >= self.low_value:
+                i1 = self.value2index(v1)
+            if v2 is not None and self.low_value < v2 <= self.high_value:
+                i2 = self.value2index(v2)
+        return i1, i2
 
     def _slice_me(self, slice_):
         """Returns a slice to slice the corresponding data axis and set the
@@ -1334,6 +1376,47 @@ class UniformDataAxis(BaseDataAxis, UnitConversion):
         self.remove_trait('offset')
         self.__init__(**d, axis=self.axis)
         self.axes_manager = axes_manager
+
+    def convert_to_vector_axis(self):
+        d = super().get_axis_dictionary()
+        axes_manager = self.axes_manager
+        self.__class__ = VectorDataAxis
+        d["_type"] = 'VectorDataAxis'
+        self.__init__(**d, axis=self.axis)
+        self.axes_manager = axes_manager
+
+
+class VectorDataAxis(UniformDataAxis):
+    """DataAxis class for vector representations of ``ragged`` data
+
+    The VectorDataAxis preforms like the Uniform DataAxis but has no size.
+    """
+    def __init__(self,
+                 index_in_array=None,
+                 index_in_vector=None,
+                 name=t.Undefined,
+                 units=t.Undefined,
+                 navigate=False,
+                 scale=1.,
+                 size=1,
+                 offset=0.,
+                 is_binned=False,
+                 **kwargs):
+
+        super().__init__(
+            index_in_array=index_in_array,
+            name=name,
+            units=units,
+            navigate=navigate,
+            is_binned=is_binned,
+            scale=scale,
+            size=size,
+            offset=offset,
+            **kwargs
+        )
+        # These traits need to added dynamically to be removed when necessary
+        self.update_axis()
+        self.index_in_vector = index_in_vector
 
 
 def _serpentine_iter(shape):

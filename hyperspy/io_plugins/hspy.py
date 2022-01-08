@@ -147,6 +147,7 @@ class HyperspyWriter(HierarchicalWriter):
         # For saving ragged array
         if chunks is None:
             chunks = 1
+        print(data[0])
         dset = group.require_dataset(key,
                                      chunks,
                                      dtype=h5py.special_dtype(vlen=data[0].dtype),

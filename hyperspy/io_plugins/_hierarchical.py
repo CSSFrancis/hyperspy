@@ -596,8 +596,11 @@ class HierarchicalWriter:
             else:
                 # If signal_axes=None, use automatic h5py chunking, otherwise
                 # optimise the chunking to contain at least one signal per chunk
+                #from hyperspy.axes import VectorDataAxis
+                #if any([isinstance(a,VectorDataAxis)for a in cls.signal.axes_manager.signal_axes]):
+                #    signal_axes=None
                 chunks = get_signal_chunks(
-                    data.shape, data.dtype, signal_axes, cls.target_size
+                    data.shape, data.dtype, None, cls.target_size
                     )
         if np.issubdtype(data.dtype, np.dtype('U')):
             # Saving numpy unicode type is not supported in h5py

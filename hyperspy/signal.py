@@ -2170,6 +2170,7 @@ class BaseSignal(FancySlicing,
             ``ragged`` value in the ``attributes`` dictionary. If None, it does
             nothing. Default is None.
 
+
         """
         # the 'full_initialisation' keyword is private API to be used by the
         # _assign_subclass method. Purposely not exposed as public API.
