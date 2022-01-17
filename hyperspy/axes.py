@@ -1172,6 +1172,7 @@ class UniformDataAxis(BaseDataAxis, UnitConversion):
         self.size = size
         self.update_axis()
         self._is_uniform = True
+        self.on_trait_change(self.update_index_bounds, 'size')
         self.on_trait_change(self.update_axis, ["scale", "offset", "size"])
 
     def _slice_me(self, _slice):
@@ -1386,7 +1387,7 @@ class UniformDataAxis(BaseDataAxis, UnitConversion):
         self.axes_manager = axes_manager
 
 
-class VectorDataAxis(UniformDataAxis):
+class VectorDataAxis(BaseDataAxis):
     """DataAxis class for vector representations of ``ragged`` data
 
     The VectorDataAxis preforms like the Uniform DataAxis but has no size.
@@ -1398,7 +1399,6 @@ class VectorDataAxis(UniformDataAxis):
                  units=t.Undefined,
                  navigate=False,
                  scale=1.,
-                 size=1,
                  offset=0.,
                  is_binned=False,
                  **kwargs):
@@ -1409,14 +1409,105 @@ class VectorDataAxis(UniformDataAxis):
             units=units,
             navigate=navigate,
             is_binned=is_binned,
-            scale=scale,
-            size=size,
-            offset=offset,
             **kwargs
-        )
+            )
         # These traits need to added dynamically to be removed when necessary
-        self.update_axis()
-        self.index_in_vector = index_in_vector
+        self.add_trait("scale", t.CFloat)
+        self.add_trait("offset", t.CFloat)
+        self.index_in_vector=index_in_vector
+        self.scale = scale
+        self.offset = offset
+        self.size = 1
+        self._is_uniform = True
+
+    def _slice_me(self, _slice):
+        """Returns a slice to slice the corresponding data axis and
+        change the offset and scale of the UniformDataAxis accordingly.
+
+        Parameters
+        ----------
+        _slice : {float, int, slice}
+
+        Returns
+        -------
+        my_slice : slice
+        """
+        my_slice = self._get_array_slices(_slice)
+        step = my_slice.step
+        if step is not None:
+            _logger.error(msg="A step is not allowed for slicing a vector axis")
+        self.low_index = my_slice.start
+        self.high_index = my_slice.stop
+        return my_slice
+
+    def value2index(self, value, rounding=round):
+        """Return the closest index/indices to the given value(s) if between the axis limits.
+
+        Parameters
+        ----------
+        value : number or string, or numpy array of number or string
+                if string, should either be a calibrated unit like "20nm"
+                or a relative slicing like "rel0.2".
+        rounding : function
+                Handling of values intermediate between two axis points:
+                If `rounding=round`, use python's standard round-half-to-even strategy to find closest value.
+                If `rounding=math.floor`, round to the next lower value.
+                If `round=math.ceil`, round to the next higher value.
+
+        Returns
+        -------
+        index : integer or numpy array
+
+        Raises
+        ------
+        ValueError
+            If value is out of bounds or contains out of bounds values (array).
+            If value is NaN or contains NaN values (array).
+            If value is incorrectly formatted str or contains incorrectly
+                formatted str (array).
+        """
+
+        if value is None:
+            return None
+
+        value = self._parse_value(value)
+
+        multiplier = 1E12
+        index = 1 / multiplier * np.trunc(
+            (value - self.offset) / self.scale * multiplier
+            )
+
+        if rounding is round:
+            # When value are negative, we need to use half away from zero
+            # approach on the index, because the index is always positive
+            index = np.where(
+                value >= 0 if np.sign(self.scale) > 0 else value < 0,
+                round_half_towards_zero(index, decimals=0),
+                round_half_away_from_zero(index, decimals=0),
+                )
+        else:
+            if rounding is math.ceil:
+                rounding = np.ceil
+            elif rounding is math.floor:
+                rounding = np.floor
+
+            index = rounding(index)
+
+        if isinstance(value, np.ndarray):
+            index = index.astype(int)
+            return index
+
+        else:
+            index = int(index)
+            return index
+
+    def update_index_bounds(self, high_index):
+        self.high_index = high_index
+
+    def _update_bounds(self, ):
+        if len(self.axis) != 0:
+            self.low_value, self.high_value = (
+                self.axis.min(), self.axis.max())
 
 
 def _serpentine_iter(shape):
@@ -2125,6 +2216,39 @@ class AxesManager(t.HasTraits):
         self.signal_size = (np.cumprod(self.signal_shape)[-1]
                             if self.signal_shape else 0)
         self._update_max_index()
+
+    def set_vector_dimension(self, value):
+        """Set the dimension of the vector dimension.
+
+        Attributes
+        ----------
+        value : int
+
+        Raises
+        ------
+        ValueError
+            If value if greater than the number of axes or is negative.
+
+        """
+        if self.ragged and value > 0:
+            raise ValueError("Signal containing ragged array must have zero "
+                             "signal dimension.")
+        if len(self._axes) == 0:
+            return
+        elif value > len(self._axes):
+            raise ValueError(
+                "The signal dimension cannot be greater"
+                " than the number of axes which is %i" % len(self._axes))
+        elif value < 0:
+            raise ValueError(
+                "The signal dimension must be a positive integer")
+
+        tl = [True] * len(self._axes)
+        if value != 0:
+            tl[-value:] = (False,) * value
+
+        for axis in self._axes:
+            axis.navigate = tl.pop(0)
 
     def set_signal_dimension(self, value):
         """Set the dimension of the signal.
