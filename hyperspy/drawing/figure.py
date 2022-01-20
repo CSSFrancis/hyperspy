@@ -77,7 +77,9 @@ class BlittedFigure(object):
         for ax in self.figure.axes:
             # Create a list of animated artists and draw them.
             artists = sorted(ax.get_children(), key=lambda x: x.zorder)
+
             for artist in artists:
+
                 if artist.get_animated():
                     ax.draw_artist(artist)
 

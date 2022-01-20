@@ -162,8 +162,11 @@ class MarkerBase(object):
             return None
         elif self.isiterable(data[ind].item()[()]) and self.auto_update:
             if self.axes_manager is None:
+
                 return self.data['x1'].item().flatten()[0]
+
             indices = self.axes_manager.indices[::-1]
+            print(data[ind].item()[indices])
             return data[ind].item()[indices]
         else:
             return data[ind].item()[()]

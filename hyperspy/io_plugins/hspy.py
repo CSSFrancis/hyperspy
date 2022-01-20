@@ -137,6 +137,7 @@ class HyperspyWriter(HierarchicalWriter):
                 data = data.rechunk(dset.chunks)
             da.store(data, dset)
         elif data.flags.c_contiguous:
+            print(dset)
             dset.write_direct(data)
         else:
             dset[:] = data

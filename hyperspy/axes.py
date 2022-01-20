@@ -113,6 +113,8 @@ def create_axis(**kwargs):
         axis_class = DataAxis
     elif 'expression' in kwargs.keys():  # Functional axis
         axis_class = FunctionalDataAxis
+    elif 'index_in_vector' in kwargs.keys():
+        axis_class = VectorDataAxis
     else:  # if not argument is provided fall back to uniform axis
         axis_class = UniformDataAxis
     return axis_class(**kwargs)
@@ -1414,10 +1416,10 @@ class VectorDataAxis(BaseDataAxis):
         # These traits need to added dynamically to be removed when necessary
         self.add_trait("scale", t.CFloat)
         self.add_trait("offset", t.CFloat)
-        self.index_in_vector=index_in_vector
+        self.index_in_vector = index_in_vector
         self.scale = scale
         self.offset = offset
-        self.size = 1
+        #self.size = 1
         self._is_uniform = True
 
     def _slice_me(self, _slice):
@@ -1508,6 +1510,13 @@ class VectorDataAxis(BaseDataAxis):
         if len(self.axis) != 0:
             self.low_value, self.high_value = (
                 self.axis.min(), self.axis.max())
+
+    def get_axis_dictionary(self):
+        d = super().get_axis_dictionary()
+        d['scale'] = self.size
+        d['offset'] = self.offset
+        d['index_in_vector'] = self.index_in_vector
+        return d
 
 
 def _serpentine_iter(shape):
@@ -1671,6 +1680,7 @@ class AxesManager(t.HasTraits):
         self._update_trait_handlers()
         self.iterpath = 'flyback'
         self._ragged = False
+        self._vector = False
 
     @property
     def ragged(self):

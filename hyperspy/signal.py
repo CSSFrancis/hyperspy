@@ -35,7 +35,7 @@ from scipy import integrate
 from scipy import signal as sp_signal
 import traits.api as t
 
-from hyperspy.axes import AxesManager
+from hyperspy.axes import AxesManager, VectorDataAxis
 from hyperspy import io
 from hyperspy.drawing import mpl_hie, mpl_hse, mpl_he
 from hyperspy.learn.mva import MVA, LearningResults
@@ -2414,6 +2414,35 @@ class BaseSignal(FancySlicing,
         self._data = np.atleast_1d(value)
 
     @property
+    def vector(self):
+        return self.axes_manager._vector
+
+    @vector.setter
+    def vector(self, value):
+        if value:
+            if self.data.dtype != object:
+                raise ValueError("The array is not ragged.")
+            num_axes = 0
+
+            for d in np.ndindex(self.axes_manager.navigation_shape):
+                object_shape = np.shape(self.data[d])
+                if len(object_shape) < 1:
+                    continue
+                else:
+                    num_axes = object_shape[-1]
+                    break
+            if len(self.axes_manager.signal_axes) == num_axes:
+                signal_axes = [i.convert_to_vector_axis() for i in self.axes_manager.signal_axes]
+                #for a in self.axes_manager.signal_axes:
+                #    self.axes_manager.signal_axes.remove(a)
+            else:
+                for i in range(num_axes):
+                    axis = {'index_in_array': None, 'vector_index': i}
+                    self.axes_manager._append_axis(**axis)
+            self.axes_manager._vector = value
+            self.axes_manager._ragged = True
+
+    @property
     def ragged(self):
         return self.axes_manager._ragged
 
@@ -2677,7 +2706,7 @@ class BaseSignal(FancySlicing,
         %s
         %s
         """
-        if self.axes_manager.ragged:
+        if self.axes_manager.ragged and not self.axes_manager._vector:
             raise RuntimeError("Plotting ragged signal is not supported.")
         if self._plot is not None:
             self._plot.close()
