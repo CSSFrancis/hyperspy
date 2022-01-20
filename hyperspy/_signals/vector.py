@@ -20,6 +20,7 @@ import numpy as np
 from hyperspy.signal import BaseSignal
 from hyperspy.drawing._markers.point import Point
 
+
 class Vector(BaseSignal):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -53,9 +54,6 @@ class Vector(BaseSignal):
         y_vectors = self.get_vector_axis(axis=yaxis).T
         return Point(x_vectors, y_vectors)
 
-    def sum(self):
-        return
-
     def vector_to_navigation(self, axes=None):
         """Convert some of the navigation dimensions to a navigation dimension.
 
@@ -84,19 +82,20 @@ class Vector(BaseSignal):
             vectors = self
         else:
             vectors = self.deepcopy()
-        nav_indexes = np.ndindex(self.axes_manager.navigation_shape)
-        scales = [a.scale for a in self.axes_manager.navigation_axes]
-        offsets = [a.offset for a in self.axes_manager.navigation_axes]
+        nav_indexes = np.ndindex(vectors.axes_manager.navigation_shape)
+        scales = [a.scale for a in vectors.axes_manager.navigation_axes]
+        offsets = [a.offset for a in vectors.axes_manager.navigation_axes]
         real_nav = [np.array(ind)*scales+offsets for ind in np.array(list(nav_indexes))]
         print(nav_indexes)
-        new_v = [tuple(r) + tuple(vector) for i, r in zip(np.ndindex(self.axes_manager.navigation_shape),
-                                                          real_nav) for vector in self.data[i]]
+        new_v = [tuple(r) + tuple(vector) for i, r in zip(np.ndindex(vectors.axes_manager.navigation_shape),
+                                                          real_nav) for vector in vectors.data[i]]
         return new_v
 
     def cluster(self,
                 method,
                 navigation_to_vector=False,
                 real_units=True,
+                inplace=True,
                 **kwargs):
         """
         Clusters the vectors based on the method.
@@ -117,4 +116,13 @@ class Vector(BaseSignal):
         vector: Vector
             A collection of vectors clustered based on the function passed.
         """
-        return
+        if inplace:
+            vectors = self
+        else:
+            vectors = self.deepcopy()
+        if real_units:
+            real_vectors = vectors.get_real_vectors()
+        labels = method(real_vectors, **kwargs)
+        groups = np.array([real_vectors[labels==l] for l in range(max(labels))],dtype=object)
+        vectors.data = groups
+        return vectors
