@@ -2414,6 +2414,7 @@ class BaseSignal(FancySlicing,
             value = np.asanyarray(value)
         self._data = np.atleast_1d(value)
 
+    @property
     def vector(self):
         return self.axes_manager._vector
 

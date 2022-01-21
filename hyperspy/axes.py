@@ -1556,7 +1556,7 @@ class AxesManager(t.HasTraits):
 
     @property
     def vector(self):
-        return self.vector
+        return self._vector
 
     def _update_trait_handlers(self, remove=False):
         things = {self._on_index_changed: '_axes.index',
@@ -2238,7 +2238,7 @@ class AxesManager(t.HasTraits):
         for axis in self.signal_axes:
             string += str(axis.size) + ", "
         string = string.rstrip(", ")
-        if self.ragged:
+        if self.ragged and not self.vector:
             string += 'ragged'
         string += ")"
         return string
