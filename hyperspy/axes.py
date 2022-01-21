@@ -1420,6 +1420,14 @@ class VectorDataAxis(UniformDataAxis):
         self.update_axis()
         self.index_in_vector = index_in_vector
 
+    def get_axis_dictionary(self):
+        d = super().get_axis_dictionary()
+        d.update({'scale': self.scale,
+                  'offset': self.offset})
+        d["index_in_vector"] =self.index_in_vector
+        return d
+
+
 
 def _serpentine_iter(shape):
     '''Similar to np.ndindex, but yields indices
