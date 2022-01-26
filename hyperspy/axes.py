@@ -1386,6 +1386,9 @@ class VectorDataAxis(UniformDataAxis):
         d["vector"] = self.vector
         return d
 
+    def _get_array_slices(self, slice_):
+        return ()
+
 
 def _serpentine_iter(shape):
     '''Similar to np.ndindex, but yields indices

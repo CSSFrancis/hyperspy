@@ -2425,7 +2425,10 @@ class BaseSignal(FancySlicing,
                 raise ValueError("The array is not ragged.")
             num_axes = 0
 
-            for d in np.ndindex(self.axes_manager.navigation_shape):
+            nav_shape = self.axes_manager.navigation_shape
+            if nav_shape == ():
+                nav_shape = 1
+            for d in np.ndindex(nav_shape):
                 object_shape = np.shape(self.data[d])
                 if len(object_shape) < 1:
                     continue
@@ -2433,7 +2436,7 @@ class BaseSignal(FancySlicing,
                     num_axes = object_shape[-1]
                     break
             if len(self.axes_manager.signal_axes) == num_axes:
-                signal_axes = [i.convert_to_vector_axis() for i in self.axes_manager.signal_axes]
+                [i.convert_to_vector_axis() for i in self.axes_manager.signal_axes]
             else:
                 for i in range(num_axes):
                     axis = {'index_in_array': None, 'vector': True}
@@ -2726,7 +2729,6 @@ class BaseSignal(FancySlicing,
             if axes_manager.navigation_dimension == 0:
                 # 0d signal without navigation axis: don't make a figure
                 # and instead, we display the value
-                print(self.data)
                 return
             self._plot = mpl_he.MPL_HyperExplorer()
         elif axes_manager.signal_dimension == 1:
@@ -4921,11 +4923,15 @@ class BaseSignal(FancySlicing,
         elif isinstance(iterating_kwargs, (tuple, list)):
             iterating_kwargs = dict((k, v) for k, v in iterating_kwargs)
 
+
         nav_indexes = s_input.axes_manager.navigation_indices_in_array
-        chunk_span = np.equal(s_input.data.chunksize, s_input.data.shape)
-        chunk_span = [
-            chunk_span[i] for i in s_input.axes_manager.signal_indices_in_array
-        ]
+        if self.ragged:
+            chunk_span = [True]
+        else:
+            chunk_span = np.equal(s_input.data.chunksize, s_input.data.shape)
+            chunk_span = [
+                chunk_span[i] for i in s_input.axes_manager.signal_indices_in_array
+            ]
         if not all(chunk_span):
             _logger.info(
                 "The chunk size needs to span the full signal size, rechunking..."
@@ -4937,6 +4943,7 @@ class BaseSignal(FancySlicing,
         autodetermine = (output_signal_size is None or output_dtype is None) # try to guess output dtype and sig size?
 
         args, arg_keys = old_sig._get_iterating_kwargs(iterating_kwargs)
+
 
         if autodetermine:  # trying to guess the output d-type and size from one signal
             testing_kwargs = {}
@@ -5089,6 +5096,7 @@ class BaseSignal(FancySlicing,
     def __deepcopy__(self, memo):
         dc = type(self)(**self._to_dictionary())
         if isinstance(dc.data, np.ndarray):
+
             dc.data = dc.data.copy()
 
         # uncomment if we want to deepcopy models as well:
