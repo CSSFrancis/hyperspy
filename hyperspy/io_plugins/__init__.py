@@ -40,6 +40,7 @@ from hyperspy.io_plugins import (
     ripple,
     semper_unf,
     sur,
+    seq,
     tiff,
 )
 
@@ -64,6 +65,7 @@ io_plugins = [
     ripple,
     semper_unf,
     sur,
+    seq,
     tiff,
 ]
 

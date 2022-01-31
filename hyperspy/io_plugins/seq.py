@@ -53,18 +53,20 @@ class SeqReader(object):
                  dark=None,
                  gain=None,
                  metadata=None,
-                 xml_file=None):
+                 xml_file=None,
+                 celeritas=False):
         self.dark_file = dark
         self.gain_file = gain
         self.xml_file = xml_file
         self.metadata_file = metadata
-        self.seq = seq
         self.metadata_dict = {}
         self.axes = []
         self.image_dict = {}
         self.dark_ref = None
         self.gain_ref = None
         self.image_dtype = None
+        self.celeritas = celeritas
+        self.seq = seq
 
     def _get_xml_file(self):
         if self.xml_file is None:
@@ -110,9 +112,9 @@ class SeqReader(object):
             file.seek(584)
             read_bytes = file.read(8)
             self.image_dict["FPS"] = struct.unpack('<d', read_bytes)[0]
-            image_size = (self.image_dict["ImageBitDepth"] *
+            image_size = int((image_info[2]/8 *
                           self.image_dict["ImageWidth"] *
-                          self.image_dict["ImageHeight"])
+                          self.image_dict["ImageHeight"]))
             if celeritas:
                 if self.segment_prebuffer is None:
                     _logger.warning("Trying to guess the segment pre-factor... Please load .xml File to help")
@@ -123,20 +125,20 @@ class SeqReader(object):
                         self.segment_prebuffer = 64
                     else:
                         self.segment_prebuffer = 4
-                buffer = (self.image_dict["ImgBytes"] - image_size)/self.segment_prebuffer
+                buffer = (image_info[2] - image_size)/self.segment_prebuffer
                 self.image_dtype = [("Array", self.image_dict["ImageBitDepth"],
                                      (self.image_dict["ImageWidth"],
                                       self.image_dict["ImageHeight"]/self.segment_prebuffer)),
                                     ("seconds", "<u4"),
                                     ("Milliseconds", "<u2"),
-                                    ("Microseconds", "<u2")
+                                    ("Microseconds", "<u2"),
                                     ("Buffer", bytes, buffer - 8)]
             else:
                 self.image_dtype = [("Array", self.image_dict["ImageBitDepth"],
                                      (self.image_dict["ImageWidth"], self.image_dict["ImageHeight"])),
                                     ("seconds", "<u4"),
                                     ("Milliseconds", "<u2"),
-                                    ("Microseconds", "<u2")
+                                    ("Microseconds", "<u2"),
                                     ("Buffer", bytes, self.image_dict["ImgBytes"]-image_size-8)]
         return
 
@@ -223,6 +225,7 @@ def file_reader(filename,
                 metadata=None,
                 xml_file=None,
                 lazy=False,
+                celeritas=False
                 ):
     """Reads a .seq file.
     Parameters
@@ -242,7 +245,8 @@ def file_reader(filename,
                     gain,
                     metadata,
                     xml_file)
-    seq._get_xml_file()
+    if celeritas:
+        seq._get_xml_file()
     seq.parse_header()
     seq.dark_ref = read_ref(dark,
                             height=seq.image_dict["ImageHeight"],
@@ -251,17 +255,17 @@ def file_reader(filename,
                             height=seq.image_dict["ImageHeight"],
                             width=seq.image_dict["ImageWidth"])
     seq.parse_metadata_file()
-    axes = seq.create_axes(nav_shape)
+    axes = seq.create_axes()
     metadata = seq.create_metadata()
     data, time = seq.get_image_data(lazy=lazy,)
-    metadata["General"]["Signal"]["Timestamps"] = time
+    metadata["General"]["Timestamps"] = time
     dictionary = {
         'data': data,
         'metadata': metadata,
         'axes': axes,
         'original_metadata': metadata,
     }
-    return dictionary
+    return [dictionary, ]
 
 
 def read_ref(file_name,
