@@ -4795,12 +4795,18 @@ class BaseSignal(FancySlicing,
         self_nav_shape = self.axes_manager.navigation_shape
         ndkwargs = {}
         ndkeys = [key for key in kwargs if isinstance(kwargs[key], BaseSignal)]
+        print(ndkeys)
         for key in ndkeys:
             nd_nav_shape = kwargs[key].axes_manager.navigation_shape
+            print(nd_nav_shape)
+            print(self_nav_shape)
             if nd_nav_shape == self_nav_shape:
+                ndkwargs[key] = kwargs.pop(key)
+            elif nd_nav_shape == () or nd_nav_shape == (1,) and self_nav_shape == () or self_nav_shape == (1,):
                 ndkwargs[key] = kwargs.pop(key)
             elif nd_nav_shape == () or nd_nav_shape == (1,):
                 # This really isn't an iterating signal.
+                print("pop", key)
                 kwargs[key] = np.squeeze(kwargs[key].data)
             else:
                 raise ValueError(
@@ -5010,6 +5016,12 @@ class BaseSignal(FancySlicing,
             axes_dicts = self.axes_manager._get_navigation_axes_dicts()
             sig.axes_manager.__init__(axes_dicts)
             sig.axes_manager._ragged = True
+            if am.navigation_dimension == 0:
+                am._append_axis(size=1,
+                                scale=1,
+                                offset=0,
+                                name="Scalar",
+                                navigate=True)
         elif axes_changed:
             am.remove(am.signal_axes[len(output_signal_size) :])
             for ind in range(len(output_signal_size) - am.signal_dimension, 0, -1):
@@ -5049,6 +5061,8 @@ class BaseSignal(FancySlicing,
     def _get_iterating_kwargs(self, iterating_kwargs):
         signal_dim_shape = self.axes_manager.signal_shape
         nav_chunks = self._get_navigation_chunk_size()
+        if nav_chunks is ():
+            nav_chunks=(1,)
         args, arg_keys = (), ()
         for key in iterating_kwargs:
             if not isinstance(iterating_kwargs[key], BaseSignal):
@@ -5063,6 +5077,8 @@ class BaseSignal(FancySlicing,
                     iterating_kwargs[key].rechunk(nav_chunks=nav_chunks, sig_chunks=-1)
             else:
                 iterating_kwargs[key] = iterating_kwargs[key].as_lazy()
+                print("key",iterating_kwargs[key])
+                print(iterating_kwargs)
                 iterating_kwargs[key].rechunk(nav_chunks=nav_chunks, sig_chunks=-1)
             extra_dims = (len(signal_dim_shape) -
                           len(iterating_kwargs[key].axes_manager.signal_shape))
