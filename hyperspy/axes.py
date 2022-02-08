@@ -324,6 +324,7 @@ class BaseDataAxis(t.HasTraits):
         self._suppress_update_value = False
         self.name = name
         self.units = units
+        self.vector=False
         self.low_index = 0
         self.on_trait_change(self._update_slice, 'navigate')
         self.on_trait_change(self.update_index_bounds, 'size')
@@ -1387,6 +1388,10 @@ class VectorDataAxis(UniformDataAxis):
                   'offset': self.offset})
         d["vector"] = self.vector
         return d
+
+    @property
+    def index_in_array(self):
+        return ()
 
     def _get_array_slices(self, slice_):
         return ()

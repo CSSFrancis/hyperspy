@@ -365,8 +365,9 @@ class LazySignal(BaseSignal):
         dc = self.data
         dcshape = dc.shape
         for _axis in self.axes_manager._axes:
-            if _axis.index_in_array < len(dcshape):
-                _axis.size = int(dcshape[_axis.index_in_array])
+            if not _axis.vector:
+                if _axis.index_in_array < len(dcshape):
+                    _axis.size = int(dcshape[_axis.index_in_array])
 
         if axis is not None:
             need_axes = self.axes_manager[axis]
@@ -447,7 +448,7 @@ class LazySignal(BaseSignal):
         if not np.iterable(axes):
             axes = (axes,)
 
-        axes = tuple([axis.index_in_array for axis in axes])
+        axes = tuple([axis.index_in_array for axis in axes if axis.vector != True])
         ax_chunks = tuple([self.data.chunks[i] for i in sorted(axes)])
 
         return ax_chunks
