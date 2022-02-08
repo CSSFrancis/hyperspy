@@ -54,7 +54,7 @@ class TestVectorSignal:
 
     def test_all_to_vector_axis(self, two_d_vector):
         new = two_d_vector.nav_to_vector(axis=0, inplace=False)
-        assert len(new.axes_manager.signal_axes) ==3
+        assert len(new.axes_manager.signal_axes) == 3
         assert new.data.shape == (3,)
         new = two_d_vector.nav_to_vector(axis=1, inplace=False)
         assert len(new.axes_manager.signal_axes) ==3
