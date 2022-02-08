@@ -34,6 +34,7 @@ from pint import UndefinedUnitError
 from scipy import integrate
 from scipy import signal as sp_signal
 import traits.api as t
+from toolz.itertoolz import concat
 
 import hyperspy
 from hyperspy.axes import AxesManager, VectorDataAxis
@@ -44,10 +45,8 @@ from hyperspy.io import assign_signal_subclass
 import hyperspy.misc.utils
 from hyperspy.misc.utils import DictionaryTreeBrowser
 from hyperspy.drawing import signal as sigdraw
-from hyperspy.defaults_parser import preferences
 from hyperspy.misc.io.tools import ensure_directory
 from hyperspy.misc.utils import iterable_not_string
-from hyperspy.external.progressbar import progressbar
 from hyperspy.exceptions import SignalDimensionError, DataDimensionError
 from hyperspy.misc import rgb_tools
 from hyperspy.misc.utils import underline, isiterable
@@ -2729,6 +2728,7 @@ class BaseSignal(FancySlicing,
             if axes_manager.navigation_dimension == 0:
                 # 0d signal without navigation axis: don't make a figure
                 # and instead, we display the value
+                print(self.data)
                 return
             self._plot = mpl_he.MPL_HyperExplorer()
         elif axes_manager.signal_dimension == 1:
@@ -4925,7 +4925,6 @@ class BaseSignal(FancySlicing,
         elif isinstance(iterating_kwargs, (tuple, list)):
             iterating_kwargs = dict((k, v) for k, v in iterating_kwargs)
 
-
         nav_indexes = s_input.axes_manager.navigation_indices_in_array
         if self.ragged:
             chunk_span = [True]
@@ -4942,8 +4941,7 @@ class BaseSignal(FancySlicing,
         else:
             old_sig = s_input
         os_am = old_sig.axes_manager
-        autodetermine = (output_signal_size is None or output_dtype is None) # try to guess output dtype and sig size?
-
+        autodetermine = (output_signal_size is None or output_dtype is None)  # try to guess output dtype and sig size?
         args, arg_keys = old_sig._get_iterating_kwargs(iterating_kwargs)
 
 
@@ -4964,23 +4962,27 @@ class BaseSignal(FancySlicing,
                 output_signal_size = temp_output_signal_size
             if output_dtype is None:
                 output_dtype = temp_output_dtype
+        output_shape = self.axes_manager._navigation_shape_in_array + output_signal_size
+        arg_pairs, adjust_chunks, new_axis, output_pattern = old_sig.get_block_pattern((old_sig.data,)+args,
+                                                                                    output_shape)
 
-        drop_axis, new_axis, axes_changed = self._get_drop_axis_new_axis(output_signal_size)
-        chunks = tuple([old_sig.data.chunks[i] for i in sorted(nav_indexes)]) + output_signal_size
-        mapped = da.map_blocks(
-            process_function_blockwise,
-            old_sig.data,
-            *args,
-            function=function,
-            nav_indexes=nav_indexes,
-            drop_axis=drop_axis,
-            new_axis=new_axis,
-            output_signal_size=output_signal_size,
-            dtype=output_dtype,
-            chunks=chunks,
-            arg_keys=arg_keys,
-            **kwargs
-        )
+        axes_changed = len(new_axis) != 0 or len(adjust_chunks) != 0
+        mapped = da.blockwise(process_function_blockwise,
+                              output_pattern,
+                              *concat(arg_pairs),
+                              adjust_chunks=adjust_chunks,
+                              new_axes=new_axis,
+                              align_arrays=False,
+                              dtype=output_dtype,
+                              concatenate=True,
+                              arg_keys=arg_keys,
+                              function=function,
+                              output_dtype=output_dtype,
+                              nav_indexes=nav_indexes,
+                              output_signal_size=output_signal_size,
+                              **kwargs
+                              )
+
         data_stored = False
         if inplace:
             if (
@@ -5033,30 +5035,31 @@ class BaseSignal(FancySlicing,
                 sig.data = sig.data.compute(num_workers=max_workers)
         return sig
 
-    def _get_drop_axis_new_axis(self, output_signal_size):
-        am = self.axes_manager
-        if output_signal_size == self.axes_manager.signal_shape:
-            drop_axis = None
-            new_axis = None
-            axes_changed = False
-        else:
-            axes_changed = True
-            if len(output_signal_size) != len(am.signal_shape):
-                drop_axis = am.signal_indices_in_array
-                nav_dim = am.navigation_dimension
-                new_axis = tuple(range(nav_dim, len(output_signal_size) + nav_dim))
-            else:
-                drop_axis = [it for (o, i, it) in zip(output_signal_size,
-                                                      am.signal_shape,
-                                                      am.signal_indices_in_array)
-                             if o != i]
-                drop_axis = tuple(drop_axis)
-                new_axis = drop_axis
-        return drop_axis, new_axis, axes_changed
+    def get_block_pattern(self, args, output_shape=None):
+        arg_patterns = tuple(tuple(range(a.ndim)) for a in args)
+        arg_shapes = tuple(a.shape for a in args)
+        output_pattern = tuple(range(len(output_shape)))
+        all_ind = arg_shapes + (output_shape,)
+        max_len = max((len(i) for i in all_ind))  # max number of dimensions
+        max_arg_len = max((len(i) for i in arg_shapes))
+        adjust_chunks = {}
+        new_axis = {}
+        output_shape = output_shape + (0,) * (max_len - len(output_shape))
+        for i in range(max_len):
+            shapes = np.array([s[i] if len(s) > i else -1 for s in (output_shape,) + arg_shapes])
+            is_equal_shape = shapes == shapes[0]  # if in shapes == output shapes
+            if not all(is_equal_shape):
+                if i > max_arg_len - 1:
+                    new_axis[i] = output_shape[i]
+                else:
+                    adjust_chunks[i] = output_shape[i]
+        arg_pairs = [(a, p) for a, p in zip(args, arg_patterns)]
+        return arg_pairs, adjust_chunks, new_axis, output_pattern
+
 
     def _get_iterating_kwargs(self, iterating_kwargs):
         signal_dim_shape = self.axes_manager.signal_shape
-        nav_chunks = self._get_navigation_chunk_size()
+        nav_chunks = self.get_chunk_size(self.axes_manager.navigation_axes)
         args, arg_keys = (), ()
         for key in iterating_kwargs:
             if not isinstance(iterating_kwargs[key], BaseSignal):
@@ -5067,20 +5070,19 @@ class BaseSignal(FancySlicing,
                     "Pass signal instances instead."
                 )
             if iterating_kwargs[key]._lazy:
-                if iterating_kwargs[key]._get_navigation_chunk_size() != nav_chunks:
-                    iterating_kwargs[key].rechunk(nav_chunks=nav_chunks, sig_chunks=-1)
+                axes = iterating_kwargs[key].axes_manager.navigation_axes
+                if iterating_kwargs[key].get_chunk_size(axes) != nav_chunks:
+                    iterating_kwargs[key].rechunk(
+                        nav_chunks=nav_chunks,
+                        sig_chunks=-1
+                        )
             else:
                 iterating_kwargs[key] = iterating_kwargs[key].as_lazy()
-
-                iterating_kwargs[key].rechunk(nav_chunks=nav_chunks, sig_chunks=-1)
-            extra_dims = (len(signal_dim_shape) -
-                          len(iterating_kwargs[key].axes_manager.signal_shape))
-            if extra_dims > 0:
-                old_shape = iterating_kwargs[key].data.shape
-                new_shape = old_shape + (1,)*extra_dims
-                args += (iterating_kwargs[key].data.reshape(new_shape), )
-            else:
-                args += (iterating_kwargs[key].data, )
+                iterating_kwargs[key].rechunk(
+                    nav_chunks=nav_chunks,
+                    sig_chunks=-1
+                    )
+            args += (iterating_kwargs[key].data, )
             arg_keys += (key,)
         return args, arg_keys
 
