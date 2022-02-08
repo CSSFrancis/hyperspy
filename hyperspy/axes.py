@@ -1340,6 +1340,8 @@ class UniformDataAxis(BaseDataAxis, UnitConversion):
 
     def convert_to_vector_axis(self):
         d = super().get_axis_dictionary()
+        d["scale"] = self.scale
+        d["offset"] = self.offset
         axes_manager = self.axes_manager
         self.__class__ = VectorDataAxis
         d["_type"] = 'VectorDataAxis'

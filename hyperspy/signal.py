@@ -5060,6 +5060,8 @@ class BaseSignal(FancySlicing,
     def _get_iterating_kwargs(self, iterating_kwargs):
         signal_dim_shape = self.axes_manager.signal_shape
         nav_chunks = self.get_chunk_size(self.axes_manager.navigation_axes)
+        if nav_chunks ==() and self.ragged:
+            nav_chunks =(1,)
         args, arg_keys = (), ()
         for key in iterating_kwargs:
             if not isinstance(iterating_kwargs[key], BaseSignal):

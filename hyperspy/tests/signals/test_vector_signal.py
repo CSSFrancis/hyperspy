@@ -21,7 +21,7 @@ import pytest
 import dask.array as da
 
 from hyperspy.decorators import lazifyTestClass
-from hyperspy.signals import BaseVectorSignal, BaseSignal
+from hyperspy.signals import BaseVectorSignal, BaseSignal, Signal2D
 
 
 class TestVectorSignal:
@@ -40,12 +40,23 @@ class TestVectorSignal:
         x = da.empty(shape=(4), dtype=object)
         for i in np.ndindex(x.shape):
             x[i] = da.random.random((6, 4))
-        s = L(x).T
+        s = BaseVectorSignal(x).T
         s.vector = True
         s.set_signal_type("vector")
         for ax, name in zip(s.axes_manager._axes, "abcd"):
             ax.name = name
         return s
+
+    def test_map(self, two_d_vector):
+        def return_ones(x, y):
+            return np.ones(3)
+        iter_signal = Signal2D(np.ones((4, 3, 2, 2)))
+        new = two_d_vector.map(return_ones,
+                               y=iter_signal,
+                               inplace=False,
+                               ragged=False)
+        assert len(new.axes_manager.signal_axes) ==1
+        assert new.data.shape == (4, 3, 3)
 
     def test_all_to_vector(self, two_d_vector):
         new = two_d_vector.nav_to_vector(inplace=False)
