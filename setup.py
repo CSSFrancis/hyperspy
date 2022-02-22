@@ -79,6 +79,7 @@ install_req = ['scipy>=1.1',
                 # included in stdlib since v3.8, but this required version requires Python 3.10
                 # We can remove this requirement when the minimum supported version becomes Python 3.10
                'importlib_metadata>=3.6',
+               'toolz',
                # numcodecs currently only supported on x86_64/AMD64 machines
                'zarr;platform_machine=="x86_64" or platform_machine=="AMD64"',
                ]
@@ -86,7 +87,8 @@ install_req = ['scipy>=1.1',
 extras_require = {
     # exclude scikit-learn==1.0 on macOS (wheels issue)
     # See https://github.com/scikit-learn/scikit-learn/pull/21227
-    "learning": ['scikit-learn!=1.0;sys_platform=="darwin"'],
+    "learning": ['scikit-learn!=1.0.0;sys_platform=="darwin"',
+                 'scikit-learn;sys_platform!="darwin"'],
     "gui-jupyter": ["hyperspy_gui_ipywidgets>=1.1.0"],
     "gui-traitsui": ["hyperspy_gui_traitsui>=1.1.0"],
     "mrcz": ["blosc>=1.5", 'mrcz>=0.3.6'],

@@ -34,7 +34,7 @@ from pint import UndefinedUnitError
 from scipy import integrate
 from scipy import signal as sp_signal
 import traits.api as t
-from toolz.itertoolz import concat
+from tlz import concat
 
 import hyperspy
 from hyperspy.axes import AxesManager, VectorDataAxis
@@ -4941,7 +4941,9 @@ class BaseSignal(FancySlicing,
         else:
             old_sig = s_input
         os_am = old_sig.axes_manager
-        autodetermine = (output_signal_size is None or output_dtype is None)  # try to guess output dtype and sig size?
+        autodetermine = (
+            output_signal_size is None or output_dtype is None
+        )  # try to guess output dtype and sig size?
         args, arg_keys = old_sig._get_iterating_kwargs(iterating_kwargs)
 
 
@@ -4951,37 +4953,38 @@ class BaseSignal(FancySlicing,
                 test_ind = (0,) * len(os_am.navigation_axes)
                 testing_kwargs[key] = np.squeeze(args[ikey][test_ind]).compute()
             testing_kwargs = {**kwargs, **testing_kwargs}
-            test_data = np.array(old_sig.inav[(0,) * len(os_am.navigation_shape)].data.compute())
+            test_data = np.array(
+                old_sig.inav[(0,) * len(os_am.navigation_shape)].data.compute()
+            )
             temp_output_signal_size, temp_output_dtype = guess_output_signal_size(
-                test_data=test_data,
-                function=function,
-                ragged=ragged,
-                **testing_kwargs,
+                test_data=test_data, function=function, ragged=ragged, **testing_kwargs,
             )
             if output_signal_size is None:
                 output_signal_size = temp_output_signal_size
             if output_dtype is None:
                 output_dtype = temp_output_dtype
         output_shape = self.axes_manager._navigation_shape_in_array + output_signal_size
-        arg_pairs, adjust_chunks, new_axis, output_pattern = old_sig.get_block_pattern((old_sig.data,)+args,
-                                                                                    output_shape)
+        arg_pairs, adjust_chunks, new_axis, output_pattern = old_sig.get_block_pattern(
+            (old_sig.data,) + args, output_shape
+        )
 
         axes_changed = len(new_axis) != 0 or len(adjust_chunks) != 0
-        mapped = da.blockwise(process_function_blockwise,
-                              output_pattern,
-                              *concat(arg_pairs),
-                              adjust_chunks=adjust_chunks,
-                              new_axes=new_axis,
-                              align_arrays=False,
-                              dtype=output_dtype,
-                              concatenate=True,
-                              arg_keys=arg_keys,
-                              function=function,
-                              output_dtype=output_dtype,
-                              nav_indexes=nav_indexes,
-                              output_signal_size=output_signal_size,
-                              **kwargs
-                              )
+        mapped = da.blockwise(
+            process_function_blockwise,
+            output_pattern,
+            *concat(arg_pairs),
+            adjust_chunks=adjust_chunks,
+            new_axes=new_axis,
+            align_arrays=False,
+            dtype=output_dtype,
+            concatenate=True,
+            arg_keys=arg_keys,
+            function=function,
+            output_dtype=output_dtype,
+            nav_indexes=nav_indexes,
+            output_signal_size=output_signal_size,
+            **kwargs,
+        )
 
         data_stored = False
         if inplace:
@@ -5046,7 +5049,9 @@ class BaseSignal(FancySlicing,
         new_axis = {}
         output_shape = output_shape + (0,) * (max_len - len(output_shape))
         for i in range(max_len):
-            shapes = np.array([s[i] if len(s) > i else -1 for s in (output_shape,) + arg_shapes])
+            shapes = np.array(
+                [s[i] if len(s) > i else -1 for s in (output_shape,) + arg_shapes]
+            )
             is_equal_shape = shapes == shapes[0]  # if in shapes == output shapes
             if not all(is_equal_shape):
                 if i > max_arg_len - 1:
@@ -5074,17 +5079,11 @@ class BaseSignal(FancySlicing,
             if iterating_kwargs[key]._lazy:
                 axes = iterating_kwargs[key].axes_manager.navigation_axes
                 if iterating_kwargs[key].get_chunk_size(axes) != nav_chunks:
-                    iterating_kwargs[key].rechunk(
-                        nav_chunks=nav_chunks,
-                        sig_chunks=-1
-                        )
+                    iterating_kwargs[key].rechunk(nav_chunks=nav_chunks, sig_chunks=-1)
             else:
                 iterating_kwargs[key] = iterating_kwargs[key].as_lazy()
-                iterating_kwargs[key].rechunk(
-                    nav_chunks=nav_chunks,
-                    sig_chunks=-1
-                    )
-            args += (iterating_kwargs[key].data, )
+                iterating_kwargs[key].rechunk(nav_chunks=nav_chunks, sig_chunks=-1)
+            args += (iterating_kwargs[key].data,)
             arg_keys += (key,)
         return args, arg_keys
 
