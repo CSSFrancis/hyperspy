@@ -2415,7 +2415,7 @@ class BaseSignal(FancySlicing,
 
     @property
     def vector(self):
-        return self.axes_manager._vector
+        return self.axes_manager.vector
 
     @vector.setter
     def vector(self, value):
@@ -2423,7 +2423,6 @@ class BaseSignal(FancySlicing,
             if self.data.dtype != object:
                 raise ValueError("The array is not ragged.")
             num_axes = 0
-
             nav_shape = self.axes_manager.navigation_shape
             if nav_shape == ():
                 nav_shape = 1
@@ -2440,7 +2439,6 @@ class BaseSignal(FancySlicing,
                 for i in range(num_axes):
                     axis = {'index_in_array': None, 'vector': True}
                     self.axes_manager._append_axis(**axis)
-            self.axes_manager._vector = True
             self.axes_manager._ragged = True
 
     @property
@@ -2453,13 +2451,15 @@ class BaseSignal(FancySlicing,
         if self.ragged == value:
             return
 
-        if value:
+        if value and not self.axes_manager.vector:
             if self.data.dtype != object:
                 raise ValueError("The array is not ragged.")
             axes = [axis for axis in self.axes_manager.signal_axes
                     if axis.index_in_array not in list(range(self.data.ndim))]
             self.axes_manager.remove(axes)
             self.axes_manager.set_signal_dimension(0)
+        elif self.axes_manager.vector:
+            pass
         else:
             if self._lazy:
                 raise NotImplementedError(
@@ -2728,7 +2728,6 @@ class BaseSignal(FancySlicing,
             if axes_manager.navigation_dimension == 0:
                 # 0d signal without navigation axis: don't make a figure
                 # and instead, we display the value
-                print(self.data)
                 return
             self._plot = mpl_he.MPL_HyperExplorer()
         elif axes_manager.signal_dimension == 1:

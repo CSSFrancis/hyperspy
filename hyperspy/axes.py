@@ -1343,6 +1343,7 @@ class UniformDataAxis(BaseDataAxis, UnitConversion):
         d = super().get_axis_dictionary()
         d["scale"] = self.scale
         d["offset"] = self.offset
+        self.remove_trait('size')
         axes_manager = self.axes_manager
         self.__class__ = VectorDataAxis
         d["_type"] = 'VectorDataAxis'
@@ -1363,7 +1364,6 @@ class VectorDataAxis(UniformDataAxis):
                  units=t.Undefined,
                  navigate=False,
                  scale=1.,
-                 size=1,
                  offset=0.,
                  is_binned=False,
                  **kwargs):
@@ -1374,13 +1374,13 @@ class VectorDataAxis(UniformDataAxis):
             navigate=navigate,
             is_binned=is_binned,
             scale=scale,
-            size=size,
             offset=offset,
             **kwargs
         )
         # These traits need to added dynamically to be removed when necessary
         self.update_axis()
         self.vector = True
+        self.remove_trait("size")
 
     def get_axis_dictionary(self):
         d = super().get_axis_dictionary()
@@ -1558,7 +1558,7 @@ class AxesManager(t.HasTraits):
         self._update_trait_handlers()
         self.iterpath = 'flyback'
         self._ragged = False
-        self._vector = False
+        #self._vector = False
 
     @property
     def ragged(self):
@@ -1566,7 +1566,7 @@ class AxesManager(t.HasTraits):
 
     @property
     def vector(self):
-        return self._vector
+        return any([isinstance(a,VectorDataAxis)for a in self._axes])
 
     def _update_trait_handlers(self, remove=False):
         things = {self._on_index_changed: '_axes.index',
@@ -2246,7 +2246,10 @@ class AxesManager(t.HasTraits):
         string = string.rstrip(", ")
         string += "|"
         for axis in self.signal_axes:
-            string += str(axis.size) + ", "
+            if axis.size==0:
+                string += "Vect " + ", "
+            else:
+                string += str(axis.size) + ", "
         string = string.rstrip(", ")
         if self.ragged and not self.vector:
             string += 'ragged'
