@@ -1371,7 +1371,7 @@ class VectorDataAxis(UniformDataAxis):
             index_in_array=index_in_array,
             name=name,
             units=units,
-            navigate=navigate,
+            navigate=False,
             is_binned=is_binned,
             scale=scale,
             offset=offset,

@@ -27,8 +27,8 @@ class BaseVectorSignal(BaseSignal):
     """A generic class for a ragged signal representing a set of vectors.
     """
     def __init__(self, *args, **kwargs):
-        if "ragged" not in kwargs:
-            kwargs["ragged"] = True
+        #if "ragged" not in kwargs:
+        # kwargs["ragged"] = True
         super().__init__(*args, **kwargs)
         #self.vector = True
         #self.vsig = SpecialSlicersSignal(self, False)
