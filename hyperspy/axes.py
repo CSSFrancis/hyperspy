@@ -251,8 +251,155 @@ class UnitConversion:
         self._units = s
 
 
-@add_gui_method(toolkey="hyperspy.DataAxis")
 class BaseDataAxis(t.HasTraits):
+    """Parent class defining common attributes for all DataAxis classes.
+
+    Parameters
+    ----------
+    name : str, optional
+        Name string by which the axis can be accessed. `<undefined>` if not set.
+    units : str, optional
+         String for the units of the axis vector. `<undefined>` if not set.
+    navigate : bool, optional
+        True for a navigation axis. Default False (signal axis).
+    is_binned : bool, optional
+        True if data along the axis is binned. Default False.
+    ragged: bool, optional
+        True if the axis refers to an axis for a sub array in a ragged array
+    """
+    name = t.Str()
+    units = t.Str()
+    navigate = t.Bool(False)
+    is_binned = t.Bool(t.Undefined)
+    ragged = t.Bool(False)
+
+    def __init__(self,
+                 name=t.Undefined,
+                 units=t.Undefined,
+                 navigate=False,
+                 is_binned=False,
+                 ragged=False,
+                 **kwargs):
+        super().__init__()
+        if '_type' in kwargs:
+            _type = kwargs.get('_type')
+            if _type != self.__class__.__name__:
+                raise ValueError(f'The passed `_type` ({_type}) of axis is '
+                                 'inconsistent with the given attributes.')
+        _name = self.__class__.__name__
+
+        self.events.index_changed = Event("""
+                    Event that triggers when the index of the `{}` changes
+
+                    Triggers after the internal state of the `{}` has been
+                    updated.
+
+                    Arguments:
+                    ---------
+                    obj : The {} that the event belongs to.
+                    index : The new index
+                    """.format(_name, _name, _name), arguments=["obj", 'index'])
+        self.events.value_changed = Event("""
+                    Event that triggers when the value of the `{}` changes
+
+                    Triggers after the internal state of the `{}` has been
+                    updated.
+
+                    Arguments:
+                    ---------
+                    obj : The {} that the event belongs to.
+                    value : The new value
+                    """.format(_name, _name, _name), arguments=["obj", 'value'])
+        self._suppress_value_changed_trigger = False
+        self._suppress_update_value = False
+        self.name = name
+        self.units = units
+        self.ragged = ragged
+        self.navigate = navigate
+        self.is_binned = is_binned
+        self.axes_manager = None
+        self._is_uniform = False
+        self.index = 0
+
+    @property
+    def is_uniform(self):
+        return self._is_uniform
+
+    def _index_changed(self, name, old, new):
+        self.events.index_changed.trigger(obj=self, index=self.index)
+        if not self._suppress_update_value:
+            new_value = self.axis[self.index]
+            if new_value != self.value:
+                self.value = new_value
+
+    @property
+    def index_in_array(self):
+        if self.axes_manager is not None:
+            return self.axes_manager._axes.index(self)
+        else:
+            raise AttributeError(
+                "This {} does not belong to an AxesManager"
+                " and therefore its index_in_array attribute "
+                " is not defined".format(self.__class__.__name__))
+
+    @property
+    def index_in_axes_manager(self):
+        if self.axes_manager is not None:
+            return self.axes_manager._get_axes_in_natural_order().\
+                index(self)
+        else:
+            raise AttributeError(
+                "This {} does not belong to an AxesManager"
+                " and therefore its index_in_array attribute "
+                " is not defined".format(self.__class__.__name__))
+
+    def _slice_me(self, slice_):
+        raise NotImplementedError("This method must be implemented by subclasses")
+
+    def _get_name(self):
+        name = (self.name
+                if self.name is not t.Undefined
+                else ("Unnamed " +
+                      ordinal(self.index_in_axes_manager))
+                if self.axes_manager is not None
+                else "Unnamed")
+        return name
+
+    def __repr__(self):
+        if hasattr(self, "size"):
+            text = '<%s axis, size: %i' % (self._get_name(),
+                                           self.size,)
+        else:
+            text = '<%s axis, size: --' % self._get_name()
+        if self.navigate is True:
+            text += ", index: %i" % self.index
+        text += ">"
+        return text
+
+    def __str__(self):
+        return self._get_name() + " axis"
+
+    def get_axis_dictionary(self):
+        return {'_type': self.__class__.__name__,
+                'name': self.name,
+                'units': self.units,
+                'navigate': self.navigate,
+                'is_binned': self.is_binned,
+                }
+
+    def copy(self):
+        return self.__class__(**self.get_axis_dictionary())
+
+    def __copy__(self):
+        return self.copy()
+
+    def __deepcopy__(self, memo):
+        cp = self.copy()
+        return cp
+
+
+@add_gui_method(toolkey="hyperspy.DataAxis")
+class BoundedBaseDataAxis(t.HasTraits):
     """Parent class defining common attributes for all DataAxis classes.
 
     Parameters
@@ -268,7 +415,7 @@ class BaseDataAxis(t.HasTraits):
     """
     name = t.Str()
     units = t.Str()
-    size = t.CInt()
+    #size = t.CInt()
     low_value = t.Float()
     high_value = t.Float()
     value = t.Range('low_value', 'high_value')
@@ -277,8 +424,9 @@ class BaseDataAxis(t.HasTraits):
     slice = t.Instance(slice)
     navigate = t.Bool(False)
     is_binned = t.Bool(t.Undefined)
-    index = t.Range('low_index', 'high_index')
-    axis = t.Array()
+    ragged = t.Bool(False)
+    #index = t.Range('low_index', 'high_index')
+    #axis = t.Array()
 
     def __init__(self,
                  index_in_array=None,
@@ -286,6 +434,7 @@ class BaseDataAxis(t.HasTraits):
                  units=t.Undefined,
                  navigate=False,
                  is_binned=False,
+                 ragged=False,
                  **kwargs):
         super().__init__()
 
@@ -323,6 +472,7 @@ class BaseDataAxis(t.HasTraits):
         self._suppress_update_value = False
         self.name = name
         self.units = units
+        self.ragged =ragged
         self.low_index = 0
         self.on_trait_change(self._update_slice, 'navigate')
         self.on_trait_change(self.update_index_bounds, 'size')
@@ -568,71 +718,7 @@ class BaseDataAxis(t.HasTraits):
                 value = np.array([self._parse_value_from_string(v) for v in value])
         return value
 
-    def value2index(self, value, rounding=round):
-        """Return the closest index/indices to the given value(s) if between the axis limits.
 
-        Parameters
-        ----------
-        value : number or numpy array
-        rounding : function
-                Handling of values intermediate between two axis points:
-                If `rounding=round`, use round-half-away-from-zero strategy to find closest value.
-                If `rounding=math.floor`, round to the next lower value.
-                If `round=math.ceil`, round to the next higher value.
-
-        Returns
-        -------
-        index : integer or numpy array
-
-        Raises
-        ------
-        ValueError
-            If value is out of bounds or contains out of bounds values (array).
-            If value is NaN or contains NaN values (array).
-        """
-        if value is None:
-            return None
-        else:
-            value = np.asarray(value)
-
-        #Should evaluate on both arrays and scalars. Raises error if there are
-        #nan values in array
-        if np.all((value >= self.low_value)*(value <= self.high_value)):
-            #Only if all values will evaluate correctly do we implement rounding
-            #function. Rounding functions will strictly operate on numpy arrays
-            #and only evaluate self.axis - v input, v a scalar within value.
-            if rounding is round:
-                #Use argmin(abs) which will return the closest value
-                # rounding_index = lambda x: np.abs(x).argmin()
-                index = numba_closest_index_round(self.axis,value).astype(int)
-            elif rounding is math.ceil:
-                #Ceiling means finding index of the closest xi with xi - v >= 0
-                #we look for argmin of strictly non-negative part of self.axis-v.
-                #The trick is to replace strictly negative values with +np.inf
-                index = numba_closest_index_ceil(self.axis,value).astype(int)
-            elif rounding is math.floor:
-                #flooring means finding index of the closest xi with xi - v <= 0
-                #we look for armgax of strictly non-positive part of self.axis-v.
-                #The trick is to replace strictly positive values with -np.inf
-                index = numba_closest_index_floor(self.axis,value).astype(int)
-            else:
-                raise ValueError(
-                    'Non-supported rounding function. Use '
-                    '`round`, `math.ceil` or `math.floor`.'
-                    )
-            #initialise the index same dimension as input, force type to int
-            # index = np.empty_like(value,dtype=int)
-            #assign on flat, iterate on flat.
-            # for i,v in enumerate(value):
-                # index.flat[i] = rounding_index(self.axis - v)
-            #Squeezing to get a scalar out if scalar in. See squeeze doc
-            return np.squeeze(index)[()]
-        else:
-            raise ValueError(
-                f'The value {value} is out of the limits '
-                f'[{self.low_value:.3g}-{self.high_value:.3g}] of the '
-                f'"{self._get_name()}" axis.'
-                )
 
     def index2value(self, index):
         if isinstance(index, da.Array):
@@ -744,6 +830,92 @@ class BaseDataAxis(t.HasTraits):
         else:
             # the axis is not ordered
             return None
+
+
+class ConstantSizeBaseDataAxis(BaseDataAxis, ABC):
+    def __init__(self,
+                 index_in_array=None,
+                 name=t.Undefined,
+                 units=t.Undefined,
+                 navigate=False,
+                 is_binned=False,
+                 axis=[1],
+                 **kwargs):
+        super().__init__(
+            index_in_array=index_in_array,
+            name=name,
+            units=units,
+            navigate=navigate,
+            is_binned=is_binned,
+            **kwargs)
+        self.add_trait("size", t.CInt)
+        self.on_trait_change(self.update_index_bounds, 'size')
+
+    def value2index(self, value, rounding=round):
+        """Return the closest index/indices to the given value(s) if between the axis limits.
+
+        Parameters
+        ----------
+        value : number or numpy array
+        rounding : function
+                Handling of values intermediate between two axis points:
+                If `rounding=round`, use round-half-away-from-zero strategy to find closest value.
+                If `rounding=math.floor`, round to the next lower value.
+                If `round=math.ceil`, round to the next higher value.
+
+        Returns
+        -------
+        index : integer or numpy array
+
+        Raises
+        ------
+        ValueError
+            If value is out of bounds or contains out of bounds values (array).
+            If value is NaN or contains NaN values (array).
+        """
+        if value is None:
+            return None
+        else:
+            value = np.asarray(value)
+
+        #Should evaluate on both arrays and scalars. Raises error if there are
+        #nan values in array
+        if np.all((value >= self.low_value)*(value <= self.high_value)):
+            #Only if all values will evaluate correctly do we implement rounding
+            #function. Rounding functions will strictly operate on numpy arrays
+            #and only evaluate self.axis - v input, v a scalar within value.
+            if rounding is round:
+                #Use argmin(abs) which will return the closest value
+                # rounding_index = lambda x: np.abs(x).argmin()
+                index = numba_closest_index_round(self.axis,value).astype(int)
+            elif rounding is math.ceil:
+                #Ceiling means finding index of the closest xi with xi - v >= 0
+                #we look for argmin of strictly non-negative part of self.axis-v.
+                #The trick is to replace strictly negative values with +np.inf
+                index = numba_closest_index_ceil(self.axis,value).astype(int)
+            elif rounding is math.floor:
+                #flooring means finding index of the closest xi with xi - v <= 0
+                #we look for armgax of strictly non-positive part of self.axis-v.
+                #The trick is to replace strictly positive values with -np.inf
+                index = numba_closest_index_floor(self.axis,value).astype(int)
+            else:
+                raise ValueError(
+                    'Non-supported rounding function. Use '
+                    '`round`, `math.ceil` or `math.floor`.'
+                    )
+            #initialise the index same dimension as input, force type to int
+            # index = np.empty_like(value,dtype=int)
+            #assign on flat, iterate on flat.
+            # for i,v in enumerate(value):
+                # index.flat[i] = rounding_index(self.axis - v)
+            #Squeezing to get a scalar out if scalar in. See squeeze doc
+            return np.squeeze(index)[()]
+        else:
+            raise ValueError(
+                f'The value {value} is out of the limits '
+                f'[{self.low_value:.3g}-{self.high_value:.3g}] of the '
+                f'"{self._get_name()}" axis.'
+                )
 
 
 class DataAxis(BaseDataAxis):
@@ -942,6 +1114,8 @@ class FunctionalDataAxis(BaseDataAxis):
             **parameters)
         # These trait needs to added dynamically to be removed when necessary
         self.add_trait("x", t.Instance(BaseDataAxis))
+        self.add_trait("size", t.CInt)
+        self.on_trait_change(self.update_index_bounds, 'size')
         if x is None:
             if size is t.Undefined:
                 raise ValueError("Please provide either `x` or `size`.")
