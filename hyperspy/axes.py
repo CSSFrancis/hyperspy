@@ -251,6 +251,87 @@ class UnitConversion:
         self._units = s
 
 
+class ColumnAxis(t.HasTraits):
+    name = t.Str()
+    units = t.Str()
+    scale = t.Float()
+    offset = t.Float()
+    def __init__(self,
+                 name=t.Undefined,
+                 units=t.Undefined,
+                 scale=1,
+                 offset=0,
+                 **kwargs):
+        super().__init__()
+        self.name = name
+        self.units = units
+        self.scale = scale
+        self.offset = offset
+
+
+    def index2value(self, index):
+        pass
+
+    def value2index(self, value, rounding=round):
+        """Return the closest index/indices to the given value(s) if between the axis limits.
+
+        Parameters
+        ----------
+        value : number or string, or numpy array of number or string
+                if string, should either be a calibrated unit like "20nm"
+                or a relative slicing like "rel0.2".
+        rounding : function
+                Handling of values intermediate between two axis points:
+                If `rounding=round`, use python's standard round-half-to-even strategy to find closest value.
+                If `rounding=math.floor`, round to the next lower value.
+                If `round=math.ceil`, round to the next higher value.
+
+        Returns
+        -------
+        index : integer or numpy array
+
+        Raises
+        ------
+        ValueError
+            If value is out of bounds or contains out of bounds values (array).
+            If value is NaN or contains NaN values (array).
+            If value is incorrectly formatted str or contains incorrectly
+                formatted str (array).
+        """
+        if value is None:
+            return None
+
+        value = self._parse_value(value)
+
+        multiplier = 1E12
+        index = 1 / multiplier * np.trunc(
+            (value - self.offset) / self.scale * multiplier
+            )
+
+        if rounding is round:
+            # When value are negative, we need to use half away from zero
+            # approach on the index, because the index is always positive
+            index = np.where(
+                value >= 0 if np.sign(self.scale) > 0 else value < 0,
+                round_half_towards_zero(index, decimals=0),
+                round_half_away_from_zero(index, decimals=0),
+                )
+        else:
+            if rounding is math.ceil:
+                rounding = np.ceil
+            elif rounding is math.floor:
+                rounding = np.floor
+
+            index = rounding(index)
+
+        if isinstance(value, np.ndarray):
+            index = index.astype(int)
+            return index
+        else:
+            index = int(index)
+            return index
+
+
 class BaseDataAxis(t.HasTraits):
     """Parent class defining common attributes for all DataAxis classes.
 
