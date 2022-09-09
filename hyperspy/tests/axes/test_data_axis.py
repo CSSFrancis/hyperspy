@@ -26,7 +26,7 @@ from numpy.testing import assert_allclose
 import traits.api as t
 import pytest
 
-from hyperspy.axes import (BaseDataAxis, DataAxis, FunctionalDataAxis,
+from hyperspy.axes import (BaseDataAxis, BoundedBaseDataAxis, DataAxis, FunctionalDataAxis,
                            UniformDataAxis, create_axis)
 from hyperspy.signals import Signal1D
 from hyperspy.misc.test_utils import assert_deep_almost_equal
