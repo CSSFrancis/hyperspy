@@ -62,10 +62,7 @@ class TestBaseDataAxis:
     def test_error_BaseDataAxis(self):
         with pytest.raises(NotImplementedError):
             self.axis._slice_me(1)
-        with pytest.raises(ValueError):
-            self.axis._parse_value_from_string('')
-        with pytest.raises(ValueError):
-            self.axis._parse_value_from_string('spam')
+
 
     #Note: The following methods from BaseDataAxis rely on the self.axis.axis
     #numpy array to be initialized, and are tested in the subclasses:
