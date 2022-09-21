@@ -1151,7 +1151,7 @@ class UniformDataAxis(DataAxis, UnitConversion):
                   'offset': self.offset})
         return d
 
-    def value2index(self, value, rounding=round):
+    def _float2index(self, value, rounding=round):
         """Return the closest index/indices to the given value(s) if between the axis limits.
 
         Parameters
@@ -1216,7 +1216,6 @@ class UniformDataAxis(DataAxis, UnitConversion):
                 return index
             else:
                 raise ValueError("The value is out of the axis limits")
-
 
     def calibrate(self, value_tuple, index_tuple, modify_calibration=True):
         scale = (value_tuple[1] - value_tuple[0]) /\
