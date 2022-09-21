@@ -177,7 +177,7 @@ class TestDataAxis:
 
     def test_value2index(self):
         assert self.axis.value2index(10.15) == 3
-        assert self.axis.value2index(60) == 8
+        assert self.axis.value2index(60.) == 8
         assert self.axis.value2index(2.5, rounding=round) == 1
         assert self.axis.value2index(2.5, rounding=math.ceil) == 2
         assert self.axis.value2index(2.5, rounding=math.floor) == 1
@@ -187,28 +187,27 @@ class TestDataAxis:
         # test rounding on negative value
         assert self.axis.value2index(-1.5, rounding=round) == 1
 
-
     def test_value2index_error(self):
         with pytest.raises(ValueError):
-            self.axis.value2index(226)
+            self.axis.value2index(226.)
 
     def test_parse_value_from_relative_string(self):
         ax = self.axis
-        assert ax._parse_value_from_string('rel0.0') == 0.0
-        assert ax._parse_value_from_string('rel0.5') == 112.5
-        assert ax._parse_value_from_string('rel1.0') == 225.0
+        assert ax.value2index('rel0.0') == 0.0
+        assert ax.value2index('rel0.5') == 11
+        assert ax.value2index('rel1.0') == 15
         with pytest.raises(ValueError):
-            ax._parse_value_from_string('rela0.5')
+            ax.value2index('rela0.5')
         with pytest.raises(ValueError):
-            ax._parse_value_from_string('rel1.5')
+            ax.value2index('rel1.5')
         with pytest.raises(ValueError):
-            ax._parse_value_from_string('abcd')
+            ax.value2index('abcd')
 
     def test_parse_value_from_string_with_units(self):
         ax = self.axis
         ax.units = 'nm'
         with pytest.raises(ValueError):
-            ax._parse_value_from_string('0.02 um')
+            ax.value2index('0.02 um')
 
     @pytest.mark.parametrize("use_indices", (False, True))
     def test_crop(self, use_indices):
@@ -245,11 +244,11 @@ class TestDataAxis:
         with pytest.raises(IndexError):
             self.axis._get_positive_index(-17)
         with pytest.raises(ValueError):
-            self.axis._get_array_slices(slice_=slice(1,2,1.5))
-        with pytest.raises(IndexError):
-            self.axis._get_array_slices(slice_=slice(225,-1.1,1))
-        with pytest.raises(IndexError):
-            self.axis._get_array_slices(slice_=slice(225.1,0,1))
+            self.axis._get_array_slices(slice_=slice(1, 2, 1.5))
+        with pytest.raises(ValueError):
+            self.axis._get_array_slices(slice_=slice(225, -1.1, 1))
+        with pytest.raises(ValueError):
+            self.axis._get_array_slices(slice_=slice(225.1, 0, 1))
 
     def test_update_from(self):
         ax2 = DataAxis(units="plumage", name="parrot", axis=np.arange(16))
@@ -361,14 +360,14 @@ class TestFunctionalDataAxis:
             self.axis.value2index(np.nan)
         #Values in out of bounds --> error out (both sides of axis)
         with pytest.raises(ValueError):
-            self.axis.value2index(-2)
+            self.axis.value2index(-2.)
         with pytest.raises(ValueError):
-            self.axis.value2index(111)
+            self.axis.value2index(111.)
         #str in --> error out
-        with pytest.raises(TypeError):
+        with pytest.raises(ValueError):
             self.axis.value2index("69")
         #Empty str in --> error out
-        with pytest.raises(TypeError):
+        with pytest.raises(ValueError):
             self.axis.value2index("")
 
         #Tests with array Input
@@ -495,9 +494,9 @@ class TestUniformDataAxis:
             self.axis.value2index(np.nan)
         #Values in out of bounds --> error out (both sides of axis)
         with pytest.raises(ValueError):
-            self.axis.value2index(-2)
+            self.axis.value2index(-2.)
         with pytest.raises(ValueError):
-            self.axis.value2index(111)
+            self.axis.value2index(111.)
         #str without unit in --> error out
         with pytest.raises(ValueError):
             self.axis.value2index("69")
@@ -678,25 +677,25 @@ class TestUniformDataAxis:
         ax = copy.deepcopy(self.axis)
         ax.units = 'nm'
         # slicing by index
-        assert ax._parse_value(5) == 5
-        assert type(ax._parse_value(5)) is int
+        assert ax.value2index(5) == 5
+        assert np.issubdtype(type(ax.value2index(5)), int)
         # slicing by calibrated value
-        assert ax._parse_value(10.5) == 10.5
-        assert type(ax._parse_value(10.5)) is float
+        assert ax.value2index(10.5) == 5
+        assert np.issubdtype((ax.value2index(10.5)), int)
         # slicing by unit
-        assert ax._parse_value('10.5nm') == 10.5
-        np.testing.assert_almost_equal(ax._parse_value('10500pm'), 10.5)
+        assert ax.value2index('10.5nm') == 5
+        np.testing.assert_almost_equal(ax.value2index('10500pm'), 5)
 
     def test_parse_value_from_relative_string(self):
         ax = self.axis
-        assert ax._parse_value_from_string('rel0.0') == 10.0
-        assert ax._parse_value_from_string('rel0.5') == 10.45
-        assert ax._parse_value_from_string('rel1.0') == 10.9
+        assert ax.value2index('rel0.0') == 0
+        assert ax.value2index('rel0.5') == 4
+        assert ax.value2index('rel1.0') == 9
 
     def test_slice_empty_string(self):
         ax = self.axis
         with pytest.raises(ValueError):
-            ax._parse_value("")
+            ax.value2index("")
 
     def test_calibrate(self):
         offset, scale = self.axis.calibrate(value_tuple=(11,12), \

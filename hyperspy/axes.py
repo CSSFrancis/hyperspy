@@ -610,7 +610,7 @@ class DataAxis(BaseDataAxis):
             ind = value  # valid numpy index
         elif np.issubdtype(dtype, np.bool):
             ind = value  # valid numpy index
-        elif np.issubdtype(dtype, np.float):
+        elif np.issubdtype(dtype, np.floating):
             ind = self._float2index(value, **kwargs)  # convert float to index
         elif np.issubdtype(dtype, np.str):
             ind = self._string2index(value)  # convert string to index
@@ -1180,8 +1180,6 @@ class UniformDataAxis(DataAxis, UnitConversion):
 
         if value is None:
             return None
-
-        value = self._parse_value(value)
 
         multiplier = 1E12
         index = 1 / multiplier * np.trunc(
