@@ -542,104 +542,88 @@ class DataAxis(BaseDataAxis):
         my_slice : slice
 
         """
-        if isinstance(slice_, slice):
-            if not self.is_uniform and isfloat(slice_.step):
-                raise ValueError(
-                    "Float steps are only supported for uniform axes.")
-
         v2i = self.value2index
 
         if isinstance(slice_, slice):
-            start = slice_.start
-            stop = slice_.stop
-            step = slice_.step
+            if not self.is_uniform and isfloat(slice_.step):
+                raise ValueError("Float steps are only supported for uniform axes.")
+            new_index = slice(*(v2i(i) for i in (slice_.start, slice_.stop, slice_.step)))
         else:
-            if isfloat(slice_):
-                start = v2i(slice_)
-            else:
-                start = self._get_positive_index(slice_)
-            stop = start + 1
-            step = None
+            new_index = v2i(slice_)
+        return new_index
 
-        start = self._parse_value(start)
-        stop = self._parse_value(stop)
-        step = self._parse_value(step)
-
-        if isfloat(step):
-            step = int(round(step / self.scale))
-
-        if isfloat(start):
-            try:
-                start = v2i(start)
-            except ValueError:
-                if start > self.high_value:
-                    # The start value is above the axis limit
-                    raise IndexError(
-                        "Start value above axis high bound for  axis %s."
-                        "value: %f high_bound: %f" % (repr(self), start,
-                                                      self.high_value))
-                else:
-                    # The start value is below the axis limit,
-                    # we slice from the start.
-                    start = None
-        if isfloat(stop):
-            try:
-                stop = v2i(stop)
-            except ValueError:
-                if stop < self.low_value:
-                    # The stop value is below the axis limits
-                    raise IndexError(
-                        "Stop value below axis low bound for  axis %s."
-                        "value: %f low_bound: %f" % (repr(self), stop,
-                                                     self.low_value))
-                else:
-                    # The stop value is below the axis limit,
-                    # we slice until the end.
-                    stop = None
-
-        if step == 0:
-            raise ValueError("slice step cannot be zero")
-
-        return slice(start, stop, step)
-
-    def _parse_value_from_string(self, value):
-        """Return calibrated value from a suitable string """
-        if len(value) == 0:
-            raise ValueError("Cannot index with an empty string")
-        # Starting with 'rel', it must be relative slicing
-        elif value.startswith('rel'):
+    def _rel_slice(self, value):
+        if self._is_increasing_order is not None:
             try:
                 relative_value = float(value[3:])
+                if relative_value > 1:
+                    raise ValueError
             except ValueError:
                 raise ValueError("`rel` must be followed by a number in range [0, 1].")
-            if relative_value < 0 or relative_value > 1:
-                raise ValueError("Relative value must be in range [0, 1]")
             value = self.low_value + relative_value * (self.high_value - self.low_value)
-        # if first character is a digit, try unit conversion
-        # otherwise we don't support it
-        elif value[0].isdigit():
-            if self.is_uniform:
-                value = self._get_value_from_value_with_units(value)
-            else:
-                raise ValueError("Unit conversion is only supported for "
-                                 "uniform axis.")
+            value = self._float2index(value)
+            return value
+
         else:
-            raise ValueError(f"`{value}` is not a suitable string for slicing.")
+            NotImplementedError("Relative slicing not implemented"
+                                " for unordered axes")
 
+    def _string2index(self, string):
+        """Converts a str index (or an array of str) into
+        an integer index (or an array of integer indexes"""
+        value = np.empty(string.shape, dtype=int)
+        for i, s in enumerate(string):
+            if s.startswith('rel'): # relative slicing
+                value[i] = self._rel_slice(value=s)
+            elif s in self.axis:  # labeled axes
+                value[i] = np.argwhere(self.axis == s)[0]
+            elif len(s) == 0:
+                raise ValueError(f"`{string}` is not a suitable string for slicing.")
+            elif s[0].isdigit() and hasattr(self, "_get_value_from_value_with_units"):  # units
+                new_value = self._get_value_from_value_with_units(s)
+                value[i] = self._float2index(np.array([new_value, ]))[0]
+            else:
+                raise ValueError(f"`{string}` is not a suitable string for slicing.")
         return value
 
-    def _parse_value(self, value):
-        """Convert the input to calibrated value if string, otherwise,
+    def value2index(self, value, **kwargs):
+        """Convert the input to calibrated value if string or float, otherwise,
         return the same value."""
-        if isinstance(value, str):
-            value = self._parse_value_from_string(value)
-        elif isinstance(value, (list, tuple, np.ndarray, da.Array)):
-            value = np.asarray(value)
-            if value.dtype.type is np.str_:
-                value = np.array([self._parse_value_from_string(v) for v in value])
-        return value
+        is_tuple = False
+        is_scalar = False
 
-    def value2index(self, value, rounding=round):
+        if value is None:
+            return None
+        elif isinstance(value, tuple):
+            is_tuple = True
+            value = np.array(value)
+        elif isinstance(value, str):
+            value = np.array([value, ])
+            is_scalar = True
+        elif isiterable(value):
+            value = np.asarray(value)
+        else:
+            value = np.array([value, ])
+            is_scalar = True
+        dtype = value.dtype
+        if np.issubdtype(dtype, np.integer):
+            ind = value  # valid numpy index
+        elif np.issubdtype(dtype, np.bool):
+            ind = value  # valid numpy index
+        elif np.issubdtype(dtype, np.float):
+            ind = self._float2index(value, **kwargs)  # convert float to index
+        elif np.issubdtype(dtype, np.str):
+            ind = self._string2index(value)  # convert string to index
+        else:
+            raise ValueError("Only ints, floats and strings"
+                             " can be cast to indexes")
+        if is_tuple:
+            ind = tuple(ind)  # array back to tuple
+        if is_scalar:
+            ind = np.squeeze(ind)[()]
+        return ind
+
+    def _float2index(self, value, rounding=round):
         """Return the closest index/indices to the given value(s) if between the axis limits.
 
         Parameters
