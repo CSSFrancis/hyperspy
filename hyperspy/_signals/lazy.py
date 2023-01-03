@@ -586,6 +586,7 @@ class LazySignal(BaseSignal):
                 self._cache_dask_chunk = self.data.__getitem__(chunk_slice).compute()
             self._cache_dask_chunk_slice = chunk_slice
 
+
         indices = list(indices)
         for i, temp_slice in enumerate(chunk_slice):
             indices[i] -= temp_slice.start

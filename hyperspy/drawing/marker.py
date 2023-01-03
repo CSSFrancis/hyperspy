@@ -16,10 +16,13 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
+import dask.array as da
 import numpy as np
 import matplotlib.pyplot as plt
 from hyperspy.events import Event, Events
 import hyperspy.drawing._markers as markers
+from hyperspy._signals.lazy import _get_navigation_dimension_chunk_slice
+from hyperspy.misc.utils import dummy_context_manager
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -44,6 +47,7 @@ class MarkerBase(object):
         self.axes_manager = None
         self.ax = None
         self.auto_update = True
+        self.keys = []
 
         # Properties
         self.marker = None
@@ -52,6 +56,8 @@ class MarkerBase(object):
         self._plot_on_signal = True
         self.name = ''
         self.plot_marker = True
+        self._cache_dask_chunk_slice = None
+        self._cache_dask_chunk = None
 
         # Events
         self.events = Events()
@@ -98,6 +104,7 @@ class MarkerBase(object):
         return marker_dict
 
     def _get_data_shape(self):
+
         data_shape = None
         for key in ('x1', 'x2', 'y1', 'y2'):
             ar = self.data[key][()]
@@ -118,25 +125,53 @@ class MarkerBase(object):
         """
         self.marker_properties = kwargs
 
-    def set_data(self, x1=None, y1=None,
-                 x2=None, y2=None, text=None, size=None):
+    def set_data(self, data=None, **kwargs):
         """
+
         Set data to the structured array. Each field of data should have
-        the same dimensions than the navigation axes. The other fields are
+
+        the same dimensions as the navigation axes. The other fields are
         overwritten.
         """
-        self.data = np.array((np.array(x1), np.array(y1),
-                              np.array(x2), np.array(y2),
-                              np.array(text), np.array(size)),
-                             dtype=[('x1', object), ('y1', object),
-                                    ('x2', object), ('y2', object),
-                                    ('text', object), ('size', object)])
+
+        if data is not None:
+            self.data = data
+            return
+        else:
+            for k in kwargs:
+                self.keys.append(k)
+            shapes = np.array([kwargs[k].shape for k in kwargs])
+            if not np.all(shapes == shapes[0]):
+                raise ValueError("All of the shapes for the data fields must be"
+                                 "equal")
+            data = np.empty(shape=shapes[0], dtype=object)
+            for ind in np.ndindex[shapes[0]]:
+                data[ind] = np.array([kwargs[k][ind] for k in kwargs])
+            self.data = data
         self._is_marker_static()
+
+    def _get_cache_dask_chunk(self, indices):
+        chunks = self.data.chunks
+        chunk_slice = _get_navigation_dimension_chunk_slice(indices,
+                                                            chunks
+                                                            )
+        if (chunk_slice != self._cache_dask_chunk_slice or
+                self._cache_dask_chunk is None):
+            with dummy_context_manager():
+                self._cache_dask_chunk = self.data.__getitem__(chunk_slice).compute()
+            self._cache_dask_chunk_slice = chunk_slice
+
+        indices = list(indices)
+        for i, temp_slice in enumerate(chunk_slice):
+            indices[i] -= temp_slice.start
+        indices = tuple(indices)
+        value = self._cache_dask_chunk[indices]
+        return value
 
     def add_data(self, **kwargs):
         """
         Add data to the structured array. Each field of data should have
-        the same dimensions than the navigation axes. The other fields are
+        the same dimensions as the navigation axes. The other fields are
         not changed.
         """
         if self.data is None:
@@ -149,6 +184,13 @@ class MarkerBase(object):
     def isiterable(self, obj):
         return not isinstance(obj, (str, bytes)) and hasattr(obj, '__iter__')
 
+    @property
+    def is_lazy(self):
+        if isinstance(self.data, da.Array):
+            return True
+        else:
+            return False
+
     def _is_marker_static(self):
 
         test = [self.isiterable(self.data[key].item()[()]) is False
@@ -159,18 +201,29 @@ class MarkerBase(object):
             self.auto_update = True
 
     def get_data_position(self, ind):
+        """ Get the data for some position in order to plot the marker"""
         data = self.data
-        if data[ind].item()[()] is None:
-            return None
-        elif self.isiterable(data[ind].item()[()]) and self.auto_update:
-            if self.axes_manager is None:
-                return self.data['x1'].item().flatten()[0]
-            indices = self.axes_manager.indices[::-1]
-            if indices == ():  # catch ragged
-                indices = 0
-            return data[ind].item()[indices]
+        if self.is_lazy:
+            # Cache data
+            return self._get_cache_dask_chunk(ind)
         else:
-            return data[ind].item()[()]
+            return data[ind]
+
+    def plot_patch(self, patch, **kwargs):
+        """
+        Plot a marker using a `matplotlib.patches.Patch` class.
+
+        Parameters
+        ----------
+        patch: matplotlib.patches.Patch
+            A patch to be plotted.  A collection of patches will be defined.
+            Any key/data defined by the self.data parameter will be
+        """
+        from matplotlib.collections import PatchCollection
+        data = self.get_data_position()
+        for d in data Pa
+        PatchCollection()
+
 
     def plot(self, render_figure=True):
         """
