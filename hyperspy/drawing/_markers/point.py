@@ -65,20 +65,30 @@ class Point(MarkerBase):
     >>> im.add_marker(m, permanent=True)
     """
 
-    def __init__(self, x, y, size=20, **kwargs):
+    def __init__(self,
+                 data=None,
+                 **kwargs):
+        """
+        Parameters
+        ----------
+        x: list
+        y: list
+        size
+        kwargs
+        """
         MarkerBase.__init__(self)
         lp = {'color': 'black'}
         self.marker_properties = lp
-        self.set_data(x1=x, y1=y, size=size)
+        self.set_data(data=data, **kwargs)
         self.set_marker_properties(**kwargs)
         self.name = 'point'
+        self._column_keys = {"x":0, "y":1, "s":2}
 
     def __repr__(self):
         string = "<marker.{}, {} (x={},y={},color={},size={})>".format(
             self.__class__.__name__,
             self.name,
-            self.get_data_position('x1'),
-            self.get_data_position('y1'),
+            self.get_data_position(),
             self.marker_properties['color'],
             self.get_data_position('size'),
         )
@@ -87,13 +97,12 @@ class Point(MarkerBase):
     def update(self):
         if self.auto_update is False:
             return
-        self.marker.set_offsets(np.squeeze(np.transpose([self.get_data_position('x1'),
-                                                         self.get_data_position('y1')])))
+        kwargs = self.get_data_position()
 
-        self.marker._sizes = [self.get_data_position('size')]
+        self.marker.set_offsets(np.squeeze(np.transpose([kwargs["x"],
+                                                         kwargs["y"]])))
+        self.marker.set_sizes = [kwargs["s"]]
 
     def _plot_marker(self):
-        self.marker = self.ax.scatter(self.get_data_position('x1'),
-                                      self.get_data_position('y1'),
-                                      **self.marker_properties)
-        self.marker._sizes = [self.get_data_position('size')]
+        kwargs = self.get_data_position()
+        self.marker = self.ax.scatter(**kwargs, **self.marker_properties)

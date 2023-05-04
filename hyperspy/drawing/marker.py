@@ -27,6 +27,9 @@ import logging
 
 _logger = logging.getLogger(__name__)
 
+def to_real_units(vectors, signal_axes):
+    for i, s in enumerate(signal_axes):
+        vectors[:,i] = s.index2value(vectors[:, i])
 
 class MarkerBase(object):
 
@@ -41,13 +44,14 @@ class MarkerBase(object):
         {'line', 'text'}
     """
 
-    def __init__(self):
+    def __init__(self, *args,  **kwargs):
         # Data attributes
         self.data = None
         self.axes_manager = None
         self.ax = None
         self.auto_update = True
-        self.keys = []
+        self._cache_dask_chunk_slice = None
+        self._cache_dask_chunk = None
 
         # Properties
         self.marker = None
@@ -56,8 +60,7 @@ class MarkerBase(object):
         self._plot_on_signal = True
         self.name = ''
         self.plot_marker = True
-        self._cache_dask_chunk_slice = None
-        self._cache_dask_chunk = None
+        self._column_keys = None  # set in subclass
 
         # Events
         self.events = Events()
@@ -76,6 +79,23 @@ class MarkerBase(object):
             self._to_dictionary(),
             self.name)
         return new_marker
+
+    @classmethod
+    def from_signal(cls, signal, real_units=True, keys=None):
+        if signal.metadata.has_item("Peaks.signal_axes") and real_units:
+            if keys is None:
+                keys = []
+            for signal_axis in signal.metadata.get_item("Peaks.signal_axes"):
+                mapped = signal.map(to_real_units, signal_axis)
+                if keys is None:
+                    keys.append(signal_axis.name)
+        else:
+            mapped = signal
+        cls()
+
+        data = data
+
+
 
     @property
     def marker_properties(self):
@@ -127,27 +147,41 @@ class MarkerBase(object):
 
     def set_data(self, data=None, **kwargs):
         """
+        Set data for some signal.
 
-        Set data to the structured array. Each field of data should have
+        There are two cases which are handled independently.
 
-        the same dimensions as the navigation axes. The other fields are
-        overwritten.
+        Case1:
+            Data is passed in one block.  In this case the data is parsed
+            and every column is defined by the default column keys for each
+            marker subclass.
+        Case2:
+            Data is passed as a set of **kwargs.  This must equal the _column_keys for
+            some subclass.
         """
-
-        if data is not None:
+        if data is not None: # Case 1
             self.data = data
             return
-        else:
-            for k in kwargs:
-                self.keys.append(k)
+        else: # Case 2
+            if not all([k in self._column_keys.keys() for k in kwargs]):
+                raise ValueError(f"The data for a marker needs to be either a "
+                                 f"properly formatted array and passed using the"
+                                 f"`data` kwarg otherwise the individual keys: "
+                                 f"{self._column_keys.keys()} can be passed as keyword"
+                                 f"arguements")
             shapes = np.array([kwargs[k].shape for k in kwargs])
             if not np.all(shapes == shapes[0]):
-                raise ValueError("All of the shapes for the data fields must be"
-                                 "equal")
-            data = np.empty(shape=shapes[0], dtype=object)
-            for ind in np.ndindex[shapes[0]]:
-                data[ind] = np.array([kwargs[k][ind] for k in kwargs])
-            self.data = data
+                raise ValueError("All of the shapes for the "
+                                 "data fields must be equal")
+            if any([kwargs[k].dtype == object for k in kwargs]): # marker not static
+                data = np.empty(shape=shapes[0],
+                                dtype=object)
+                for ind in np.ndindex[shapes[0]]:
+                    data[ind] = np.array([kwargs[k][ind] for k in kwargs])
+                self.data = data
+            else: # marker static
+                data = np.array([kwargs[k] for k in kwargs])
+                self.data = data
         self._is_marker_static()
 
     def _get_cache_dask_chunk(self, indices):
@@ -205,24 +239,17 @@ class MarkerBase(object):
         data = self.data
         if self.is_lazy:
             # Cache data
-            return self._get_cache_dask_chunk(ind)
+            pos_data = self._get_cache_dask_chunk(ind)
         else:
-            return data[ind]
-
-    def plot_patch(self, patch, **kwargs):
-        """
-        Plot a marker using a `matplotlib.patches.Patch` class.
-
-        Parameters
-        ----------
-        patch: matplotlib.patches.Patch
-            A patch to be plotted.  A collection of patches will be defined.
-            Any key/data defined by the self.data parameter will be
-        """
-        from matplotlib.collections import PatchCollection
-        data = self.get_data_position()
-        for d in data Pa
-        PatchCollection()
+            pos_data =  data[ind]
+        columns = pos_data.shape[1]
+        kwds = {}
+        for k, v in self.column_keys.items():
+            if v<columns:
+                kwds[k]=pos_data[:,v]
+            else:
+                kwds[k]=None
+        return kwds
 
 
     def plot(self, render_figure=True):
