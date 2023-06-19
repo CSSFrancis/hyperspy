@@ -29,7 +29,9 @@ import numpy as np
 
 from hyperspy.learn.svd_pca import svd_solve
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 def mlpca(

@@ -18,7 +18,6 @@
 
 import math
 import numbers
-import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -28,7 +27,9 @@ from hyperspy.misc.array_tools import rebin
 from hyperspy.misc.elements import elements as elements_db
 import hyperspy.defaults_parser
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 def _estimate_gain(ns, cs,

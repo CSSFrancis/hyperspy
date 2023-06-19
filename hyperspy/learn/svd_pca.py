@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
-import logging
 from packaging.version import Version
 
 import numpy as np
@@ -29,8 +28,9 @@ from hyperspy.misc.machine_learning.import_sklearn import (
 )
 from hyperspy.misc.utils import is_cupy_array
 
+from hyperspy.logger import initialize_logger
 
-_logger = logging.getLogger(__name__)
+_logger = initialize_logger(__name__)
 
 
 def svd_flip_signs(u, v, u_based_decision=True):

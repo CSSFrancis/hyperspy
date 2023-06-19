@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 import itertools
-import logging
 
 import numpy as np
 import warnings
@@ -37,7 +36,9 @@ from hyperspy.docstrings.plot import (
 from hyperspy.docstrings.signal import LAZYSIGNAL_DOC
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 class EDSSpectrum(Signal1D):

@@ -19,7 +19,6 @@
 import os
 import glob
 import warnings
-import logging
 import importlib
 
 import numpy as np
@@ -42,8 +41,9 @@ from hyperspy.extensions import ALL_EXTENSIONS
 from hyperspy.docstrings.signal import SHOW_PROGRESSBAR_ARG
 from hyperspy.docstrings.utils import STACK_METADATA_ARG
 
+from hyperspy.logger import initialize_logger
 
-_logger = logging.getLogger(__name__)
+_logger = initialize_logger(__name__)
 
 
 # Utility string:

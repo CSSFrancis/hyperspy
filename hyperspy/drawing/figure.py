@@ -18,13 +18,14 @@
 
 import textwrap
 import matplotlib.pyplot as plt
-import logging
 
 from hyperspy.events import Event, Events
 from hyperspy.drawing import utils
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 class BlittedFigure(object):

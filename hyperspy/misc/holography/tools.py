@@ -18,9 +18,10 @@
 
 import numpy as np
 from scipy.fftpack import fft2
-import logging
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 def calculate_carrier_frequency(holo_data, sb_position, scale):

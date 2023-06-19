@@ -18,7 +18,6 @@
 
 
 import time
-import logging
 from multiprocessing import Manager
 import numpy as np
 from dask.array import Array as dar
@@ -26,7 +25,9 @@ from dask.array import Array as dar
 from hyperspy.utils.parallel_pool import ParallelPool
 from hyperspy.samfire_utils.samfire_worker import create_worker
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 def _walk_compute(athing):

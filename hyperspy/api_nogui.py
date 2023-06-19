@@ -23,8 +23,8 @@ import logging
 import importlib
 import sys
 
-_logger = logging.getLogger(__name__)
-from hyperspy.logger import set_log_level
+_logger = initialize_logger(__name__)
+from hyperspy.logger import set_log_level, initialize_logger
 from hyperspy.defaults_parser import preferences
 set_log_level(preferences.General.logging_level)
 

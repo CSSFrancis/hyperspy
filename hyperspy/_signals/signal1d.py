@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
-import logging
 import math
 import os
 import warnings
@@ -59,8 +58,9 @@ from hyperspy.docstrings.signal import (
 from hyperspy.docstrings.plot import (
     BASE_PLOT_DOCSTRING, BASE_PLOT_DOCSTRING_PARAMETERS, PLOT1D_DOCSTRING)
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
 
+_logger = initialize_logger(__name__)
 
 def find_peaks_ohaver(y, x=None, slope_thresh=0., amp_thresh=None,
                       medfilt_radius=5, maxpeakn=30000, peakgroup=10,

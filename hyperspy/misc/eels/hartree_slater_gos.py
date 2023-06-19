@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
-import logging
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +25,9 @@ from hyperspy.defaults_parser import preferences
 from hyperspy.misc.eels.base_gos import TabulatedGOS
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 R = constants.value("Rydberg constant times hc in eV")
 a0 = constants.value("Bohr radius")

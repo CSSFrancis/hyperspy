@@ -55,8 +55,9 @@ from hyperspy.docstrings.signal import (
 from hyperspy.docstrings.model import EELSMODEL_PARAMETERS
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
 
+_logger = initialize_logger(__name__)
 
 @add_gui_method(toolkey="hyperspy.microscope_parameters_EELS")
 class EELSTEMParametersUI(BaseSetMetadataItems):

@@ -17,12 +17,12 @@
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
 import numpy as np
-import logging
 
 from hyperspy._components.expression import Expression
 
+from hyperspy.logger import initialize_logger
 
-_logger = logging.getLogger(__name__)
+_logger = initialize_logger(__name__)
 
 
 class Exponential(Expression):

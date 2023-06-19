@@ -44,7 +44,9 @@ from hyperspy.docstrings.signal import (
     LAZYSIGNAL_DOC,
 )
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 def _first_nav_pixel_data(s):

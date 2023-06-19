@@ -35,9 +35,9 @@ from IPython.display import display_pretty, display
 from hyperspy.misc.model_tools import current_component_values
 from hyperspy.misc.utils import get_object_package_info
 
-import logging
+from hyperspy.logger import initialize_logger
 
-_logger = logging.getLogger(__name__)
+_logger = initialize_logger(__name__)
 
 
 class NoneFloat(t.CFloat):   # Lazy solution, but usable

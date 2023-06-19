@@ -18,7 +18,6 @@
 
 
 import configparser
-import logging
 import os
 from pathlib import Path
 
@@ -27,11 +26,12 @@ import traits.api as t
 from hyperspy.misc.config_dir import config_path, data_path
 from hyperspy.misc.ipython_tools import turn_logging_on, turn_logging_off
 from hyperspy.ui_registry import add_gui_method
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 defaults_file = Path(config_path, 'hyperspyrc')
 eels_gos_files = Path(data_path, 'EELS_GOS.tar.gz')
-
-_logger = logging.getLogger(__name__)
 
 
 def guess_gos_path():

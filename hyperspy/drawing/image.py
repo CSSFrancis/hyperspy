@@ -24,7 +24,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize, LogNorm, SymLogNorm, PowerNorm
 from traits.api import Undefined
-import logging
 import inspect
 import copy
 from rsciio.utils import rgb_tools
@@ -40,8 +39,9 @@ from hyperspy.misc.test_utils import ignore_warning
 from hyperspy.defaults_parser import preferences
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
 
+_logger = initialize_logger(__name__)
 
 class ImagePlot(BlittedFigure):
 

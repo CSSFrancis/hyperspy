@@ -17,13 +17,14 @@
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
 import numpy as np
-import logging
 
 from hyperspy._components.expression import Expression
 from hyperspy.misc.utils import ordinal
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 class Polynomial(Expression):

@@ -17,7 +17,6 @@
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
 
-import logging
 import types
 import warnings
 
@@ -49,7 +48,9 @@ except ImportError:
     mdp_installed = False
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 if import_sklearn.sklearn_installed:

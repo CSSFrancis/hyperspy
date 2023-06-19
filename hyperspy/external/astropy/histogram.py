@@ -5,7 +5,6 @@ Ported again from the astropy project: https://astropy.org/
 Tools for working with distributions
 """
 
-import logging
 
 import numpy as np
 from scipy.optimize import fmin
@@ -14,7 +13,9 @@ from scipy.special import gammaln
 from hyperspy.docstrings.signal import HISTOGRAM_MAX_BIN_ARGS
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 def knuth_bin_width(data, return_bins=False, quiet=True, max_num_bins=250):

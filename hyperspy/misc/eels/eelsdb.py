@@ -18,7 +18,6 @@
 
 """This module provides tools to interact with The EELS Database."""
 import requests
-import logging
 
 from hyperspy.defaults_parser import preferences
 from hyperspy.docstrings.signal import SHOW_PROGRESSBAR_ARG
@@ -27,7 +26,9 @@ from hyperspy.io import dict2signal
 from rsciio.msa import parse_msa_string
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 def eelsdb(spectrum_type=None, title=None, author=None, element=None, formula=None,

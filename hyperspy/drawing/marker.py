@@ -20,9 +20,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from hyperspy.events import Event, Events
 import hyperspy.drawing._markers as markers
-import logging
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 class MarkerBase(object):

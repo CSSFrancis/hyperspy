@@ -17,14 +17,15 @@
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
 import math
-import logging
 
 import numpy as np
 from scipy import integrate, interpolate, constants
 
 from hyperspy.misc.eels.base_gos import BaseGOS
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 XU = [
     .82, .52, .52, .42, .30, .29, .22, .30, .22, .16, .12, .13, .13, .14, .16,

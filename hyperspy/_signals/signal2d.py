@@ -20,7 +20,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.ma as ma
 import dask.array as da
-import logging
 import warnings
 from copy import deepcopy
 
@@ -57,7 +56,9 @@ from hyperspy.utils.peakfinders2D import (
         _get_peak_position_and_intensity)
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 def shift_image(im, shift=0, interpolation_order=1, fill_value=np.nan):

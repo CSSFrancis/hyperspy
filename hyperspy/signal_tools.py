@@ -18,7 +18,6 @@
 
 import copy
 import functools
-import logging
 
 import matplotlib
 import matplotlib.colors
@@ -45,7 +44,9 @@ from hyperspy.misc.array_tools import numba_histogram
 from hyperspy.misc.math_tools import check_random_state
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 class LineInSignal2D(t.HasTraits):

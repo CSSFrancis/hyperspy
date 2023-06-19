@@ -21,7 +21,6 @@ from __future__ import division
 import warnings
 import numpy as np
 import math
-import logging
 
 from hyperspy.misc.utils import stash_active_state
 from hyperspy.misc.eds.utils import _get_element_and_line
@@ -34,7 +33,9 @@ import hyperspy.components1d as create_component
 from hyperspy.misc.test_utils import ignore_warning
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 eV2keV = 1000.
 sigma2fwhm = 2 * math.sqrt(2 * math.log(2))

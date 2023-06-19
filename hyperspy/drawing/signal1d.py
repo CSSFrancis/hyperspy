@@ -30,8 +30,9 @@ from hyperspy.events import Event, Events
 from hyperspy.misc.test_utils import ignore_warning
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
 
+_logger = initialize_logger(__name__)
 
 class Signal1DFigure(BlittedFigure):
 

@@ -17,7 +17,6 @@
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
 
-import logging
 import math
 
 import numpy as np
@@ -31,8 +30,9 @@ from hyperspy.misc.eels.effective_angle import effective_angle
 from hyperspy.ui_registry import add_gui_method
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
 
+_logger = initialize_logger(__name__)
 
 @add_gui_method(toolkey="hyperspy.EELSCLEdge_Component")
 class EELSCLEdge(Component):

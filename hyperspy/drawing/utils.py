@@ -19,7 +19,6 @@
 import copy
 from functools import partial
 import itertools
-import logging
 from packaging.version import Version
 import textwrap
 import warnings
@@ -39,8 +38,9 @@ from hyperspy.defaults_parser import preferences
 from hyperspy.misc.utils import to_numpy
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
 
+_logger = initialize_logger(__name__)
 
 def contrast_stretching(data, vmin=None, vmax=None):
     """Estimate bounds of the data to display.

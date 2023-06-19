@@ -17,14 +17,15 @@
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
 
-import logging
 import time
 from multiprocessing import Pool, cpu_count
 from multiprocessing.pool import Pool as Pool_type
 
 import numpy as np
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 class ParallelPool:

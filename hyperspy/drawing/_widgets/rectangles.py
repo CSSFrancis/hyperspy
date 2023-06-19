@@ -18,12 +18,13 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import logging
 
 from hyperspy.drawing.widget import Widget2DBase, ResizersMixin
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 # Track if we have already warned when the widget is out of range
 already_warn_out_of_range = False
 

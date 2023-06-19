@@ -42,13 +42,13 @@ from hyperspy.misc.math_tools import isfloat
 from hyperspy.ui_registry import add_gui_method, get_gui
 from hyperspy.defaults_parser import preferences
 from hyperspy._components.expression import _parse_substitutions
-
+from hyperspy.logger import initialize_logger
 
 import warnings
 import inspect
 from collections.abc import Iterable
 
-_logger = logging.getLogger(__name__)
+_logger = initialize_logger(__name__)
 
 
 FACTOR_DOCSTRING = \

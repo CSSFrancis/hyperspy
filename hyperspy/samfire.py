@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
-import logging
 from multiprocessing import cpu_count
 import warnings
 
@@ -32,8 +31,9 @@ from hyperspy.samfire_utils.strategy import LocalStrategy, GlobalStrategy
 from hyperspy.samfire_utils.local_strategies import ReducedChiSquaredStrategy
 from hyperspy.samfire_utils.global_strategies import HistogramStrategy
 
+from hyperspy.logger import initialize_logger
 
-_logger = logging.getLogger(__name__)
+_logger = initialize_logger(__name__)
 
 
 class StrategyList(list):

@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
-import logging
 from itertools import chain
 
 import numpy as np
@@ -25,7 +24,9 @@ from scipy.stats import halfnorm
 from hyperspy.external.progressbar import progressbar
 from hyperspy.misc.math_tools import check_random_state
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 def _thresh(X, lambda1, vmax):

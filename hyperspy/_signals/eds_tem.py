@@ -18,7 +18,6 @@
 
 
 import warnings
-import logging
 
 import traits.api as t
 import numpy as np
@@ -37,7 +36,9 @@ from hyperspy.misc.utils import isiterable
 from hyperspy.external.progressbar import progressbar
 from hyperspy.axes import DataAxis
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 @add_gui_method(toolkey="hyperspy.microscope_parameters_EDS_TEM")

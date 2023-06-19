@@ -16,15 +16,15 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
-import logging
 import copy
 import yaml
 
 from pathlib import Path
 import importlib_metadata as metadata
 
+from hyperspy.logger import initialize_logger
 
-_logger = logging.getLogger(__name__)
+_logger = initialize_logger(__name__)
 
 # Load hyperspy's own extensions
 _ext_f = Path(__file__).resolve().parent.joinpath("hyperspy_extension.yaml")

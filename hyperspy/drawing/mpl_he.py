@@ -25,7 +25,9 @@ from hyperspy.drawing import widgets, signal1d, image
 from hyperspy.defaults_parser import preferences
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 class MPL_HyperExplorer(object):

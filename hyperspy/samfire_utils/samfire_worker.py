@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
-import logging
 import os
 import time
 import sys
@@ -31,7 +30,9 @@ matplotlib.rcParams['backend'] = 'Agg'
 from hyperspy.signal import BaseSignal
 from hyperspy.utils.model_selection import AICc
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 class Worker:

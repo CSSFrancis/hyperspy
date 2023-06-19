@@ -19,16 +19,18 @@
 
 import importlib
 import logging
+import sys
 
 import hyperspy.api_nogui
 from hyperspy.api_nogui import __doc__, get_configuration_directory_path
 from hyperspy.defaults_parser import preferences
-from hyperspy.logger import set_log_level
+from hyperspy.logger import set_log_level,initialize_logger
+
+
+
 from hyperspy.Release import version as __version__
 
-
-_logger = logging.getLogger(__name__)
-
+_logger = initialize_logger(__name__)
 
 __all__ = hyperspy.api_nogui.__all__
 _import_mapping = hyperspy.api_nogui._import_mapping

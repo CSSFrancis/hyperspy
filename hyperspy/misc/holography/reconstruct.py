@@ -19,9 +19,10 @@
 import numpy as np
 from scipy.fftpack import fft2, ifft2, fftshift
 import matplotlib.pyplot as plt
-import logging
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 
 def estimate_sideband_position(

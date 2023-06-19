@@ -23,7 +23,6 @@ from datetime import datetime
 from functools import partial
 import inspect
 from itertools import product
-import logging
 import numbers
 from packaging.version import Version
 from pathlib import Path
@@ -82,8 +81,9 @@ from hyperspy.misc.signal_tools import are_signals_aligned, broadcast_signals
 from hyperspy.misc.math_tools import outer_nd, hann_window_nth_order, check_random_state
 from hyperspy.exceptions import VisibleDeprecationWarning, LazyCupyConversion
 
+from hyperspy.logger import initialize_logger
 
-_logger = logging.getLogger(__name__)
+_logger = initialize_logger(__name__)
 
 try:
     import cupy as cp

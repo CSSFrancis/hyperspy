@@ -17,7 +17,6 @@
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
 from functools import partial
-import logging
 import os
 
 import numpy as np
@@ -45,7 +44,9 @@ from hyperspy.misc.machine_learning import import_sklearn
 from hyperspy.misc.utils import multiply, dummy_context_manager, isiterable
 
 
-_logger = logging.getLogger(__name__)
+from hyperspy.logger import initialize_logger
+
+_logger = initialize_logger(__name__)
 
 lazyerror = NotImplementedError('This method is not available in lazy signals')
 
