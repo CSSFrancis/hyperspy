@@ -1574,7 +1574,7 @@ class Signal1D(BaseSignal, CommonSignal1D):
 
     estimate_peak_width.__doc__ %= (SHOW_PROGRESSBAR_ARG, PARALLEL_ARG, MAX_WORKERS_ARG)
 
-    def get_line_intensity(self,
+    def get_intensity(self,
                            indexes,
                            start=None,
                            stop=1.0,
