@@ -2835,6 +2835,14 @@ class BaseSignal(FancySlicing,
                 )
             return np.nan_to_num(to_numpy(navigator.data)).squeeze()
 
+        def get_dynamic_image_explorer(*args, **kwargs):
+            am = self.axes_manager
+            nav_ind = am.indices[2:]  # image at first 2 nav indices
+            slices = [slice(None)] * len(am.navigation_axes)
+            slices[2:] = nav_ind
+            ind = navigator.isig.__getitem__(slices=slices)  # Get the value from the nav reverse because hyperspy
+            return np.nan_to_num(to_numpy(ind.data)).squeeze()
+
         def get_dynamic_explorer_wrapper(*args, **kwargs):
             navigator.axes_manager.indices = self.axes_manager.indices[
                 navigator.axes_manager.signal_dimension:]
@@ -2898,12 +2906,18 @@ class BaseSignal(FancySlicing,
                 # Static navigator
                 if is_shape_compatible(axes_manager.navigation_shape,
                                        navigator.axes_manager.signal_shape):
-                    self._plot.navigator_data_function = get_static_explorer_wrapper
+                    if len(axes_manager.navigation_shape) > 2:
+                        self._plot.navigator_data_function = get_dynamic_image_explorer
+                    else:
+                        self._plot.navigator_data_function = get_static_explorer_wrapper
                 # Static transposed navigator
                 elif is_shape_compatible(axes_manager.navigation_shape,
                                          navigator.axes_manager.navigation_shape):
                     navigator = navigator.T
-                    self._plot.navigator_data_function = get_static_explorer_wrapper
+                    if len(axes_manager.navigation_shape) > 2:
+                        self._plot.navigator_data_function = get_dynamic_image_explorer
+                    else:
+                        self._plot.navigator_data_function = get_static_explorer_wrapper
                 # Dynamic navigator
                 elif (axes_manager.navigation_shape ==
                       navigator.axes_manager.signal_shape +
@@ -2925,6 +2939,8 @@ class BaseSignal(FancySlicing,
                             lambda axes_manager=None: to_numpy(self.data)
                 elif navigator == "spectrum":
                     self._plot.navigator_data_function = get_1D_sum_explorer_wrapper
+                elif navigator == "image":
+                    self._plot.navigator_data_function = get_image
             elif navigator is None:
                 self._plot.navigator_data_function = None
             else:
