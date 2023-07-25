@@ -341,7 +341,10 @@ class BaseDataAxis(t.HasTraits):
 
         self._suppress_value_changed_trigger = False
         self._suppress_update_value = False
-        self.name = name
+        try:
+            self.name = name
+        except:
+            self.name =""
         self.units = units
         self.low_index = 0
         self.on_trait_change(self._update_slice, 'navigate')
