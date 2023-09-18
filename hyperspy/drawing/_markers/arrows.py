@@ -26,9 +26,16 @@ class Arrows(Markers):
 
     marker_type = "Arrows"
 
-    def __init__(
-        self, offsets, U, V, C=None, scale=1, angles="xy", scale_units="xy", **kwargs
-    ):
+    def __init__(self,
+                 offsets,
+                 U,
+                 V,
+                 C=None,
+                 scale=1,
+                 angles="xy",
+                 scale_units="xy",
+                 **kwargs
+                 ):
         """
         Initialize the set of Arrows Markers.
 

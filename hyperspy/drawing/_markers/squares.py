@@ -16,13 +16,14 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 import numpy as np
-from matplotlib.collections import RegularPolyCollection
+from hyperspy.external.matplotlib.collections import RectangleCollection
 
-from hyperspy.docstrings.markers import OFFSET_DOCSTRING
-from hyperspy.drawing.markers import Markers
+from hyperspy.docstrings.markers import (OFFSET_DOCSTRING,
+                                         UNITS_DOCSTRING,
+                                         ANGLE_DOCSTRING)
+from hyperspy.drawing._markers._markers_with_widths_heights import _EqualWidthsHeightsMarkers
 
-
-class Squares(Markers):
+class Squares(_EqualWidthsHeightsMarkers):
     """
     A Collection of square markers using
     :py:class`matplotlib.collections.RegularPolyCollection`.
@@ -35,8 +36,8 @@ class Squares(Markers):
         offsets,
         sizes,
         offsets_transform="data",
-        transform="xaxis_scale",
-        rotation=0,
+        units="x",
+        angles=(0,),
         **kwargs
     ):
         """
@@ -46,18 +47,23 @@ class Squares(Markers):
         ----------
         %s
         sizes : Array-like
-            The size of the squares.
+            The half of the squares.
+        %s
+        %s
+        kwargs:
+            Additional keyword arguments are passed to
+            ``matplotlib.collections.RectangleCollection``.
         """
-        kwargs["numsides"] = 4
-        kwargs["rotation"] = rotation + np.pi / 4  # rotate by 45 degrees
-
         super().__init__(
-            collection_class=RegularPolyCollection,
-            offsets=offsets,
+            collection_class=RectangleCollection,
             sizes=sizes,
+            offsets=offsets,
+            angles=angles,
+            units=units,
             offsets_transform=offsets_transform,
-            transform=transform,
             **kwargs
         )
 
-    __init__.__doc__ %= OFFSET_DOCSTRING
+    __init__.__doc__ %= (OFFSET_DOCSTRING,
+                         UNITS_DOCSTRING,
+                         ANGLE_DOCSTRING)

@@ -25,7 +25,11 @@ class Polygons(Markers):
 
     marker_type = "Polygons"
 
-    def __init__(self, verts, offsets_transform="display", transform="data", **kwargs):
+    def __init__(self,
+                 verts,
+                 offsets_transform="display",
+                 transform="data",
+                 **kwargs):
         """Initialize the set of Segments Markers.
 
         Parameters

@@ -2,6 +2,7 @@ from matplotlib import artist, path as mpath, transforms
 from matplotlib.collections import Collection, _CollectionWithSizes
 from matplotlib.textpath import TextPath, TextToPath
 from matplotlib.font_manager import FontProperties
+from hyperspy.external.matplotlib.path import Path
 import numpy as np
 import math
 
@@ -235,7 +236,7 @@ class RectangleCollection(_CollectionWithWidthHeightAngle):
         Forwarded to `Collection`.
 
     """
-    _path_generator = mpath.Path.unit_rectangle
+    _path_generator = Path.unit_rectangle
 
 
 class TextCollection(Collection):

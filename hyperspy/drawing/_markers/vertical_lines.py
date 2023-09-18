@@ -26,15 +26,13 @@ class VerticalLines(Markers):
 
     marker_type = "VerticalLines"
 
-    def __init__(
-        self, offsets, offsets_transform="display", **kwargs
-    ):
+    def __init__(self, offsets, **kwargs):
         """
         Initialize the set of Vertical Line Markers.
 
         Parameters
         ----------
-        x: [n]
+        offsets: [n]
             Positions of the markers
         kwargs: dict
             Keyword arguments passed to the underlying marker collection. Any argument
@@ -43,23 +41,26 @@ class VerticalLines(Markers):
         """
         if "transform" in kwargs and kwargs["transform"] != "xaxis":
             raise ValueError(
-                "VerticalLines markers must have transform='xaxis'."
+                "HorizontalLines markers must have transform='xaxis'."
             )
-        transform = "xaxis"
-
+        if "offsets_transform" in kwargs and kwargs["offsets_transform"] != "display":
+            raise ValueError(
+                "HorizontalLines markers must have offsets_transform='display'."
+            )
+        kwargs["transform"] = "xaxis"
+        kwargs["offsets_transform"] = "display"
         # Data attributes
         Markers.__init__(
             self,
             offsets=offsets,
-            offsets_transform=offsets_transform,
-            transform=transform,  # so that the markers span the whole y-axis
             collection_class=LineCollection,
             **kwargs
         )
 
-    def get_data_position(self, get_static_kwargs=True):
+    def get_data_position(self, get_static_kwargs=True, get_modified=True):
         kwargs = super().get_data_position(get_static_kwargs=get_static_kwargs)
-        x_pos = kwargs.pop("offsets")
+        if get_modified:
+            x_pos = kwargs.pop("offsets")
         new_segments = np.array(
             [
                 [

@@ -16,12 +16,17 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
-from hyperspy.docstrings.markers import OFFSET_DOCSTRING
-from hyperspy.drawing.markers import Markers
+from hyperspy.docstrings.markers import (OFFSET_DOCSTRING,
+                                         ANGLE_DOCSTRING,
+                                         UNITS_DOCSTRING,
+                                         HEIGHTS_DOCSTRING,
+                                         WIDTHS_DOCSTRING)
+
+from hyperspy.drawing._markers._markers_with_widths_heights import _WidthsHeightsMarkers
 from hyperspy.external.matplotlib.collections import EllipseCollection
 
 
-class Ellipses(Markers):
+class Ellipses(_WidthsHeightsMarkers):
     """A set of Ellipse Markers"""
 
     marker_type = "Ellipses"
@@ -32,7 +37,6 @@ class Ellipses(Markers):
         heights,
         widths,
         offsets_transform="data",
-        transform="display",
         units="xy",
         angles=(0,),
         **kwargs
@@ -42,12 +46,10 @@ class Ellipses(Markers):
         Parameters
         ----------
         %s
-        widths: array-like
-            The lengths of the first axes (e.g., major axis lengths).
-        heights: array-like
-            The lengths of second axes.
-        angles : array-like
-            The angles of the first axes, degrees CCW from the x-axis.
+        %s
+        %s
+        %s
+        %s
         kwargs:
             Additional keyword arguments are passed to :py:class:`matplotlib.collections.EllipseCollection`.
         """
@@ -58,9 +60,12 @@ class Ellipses(Markers):
             heights=heights,
             widths=widths,
             angles=angles,
-            transform=transform,
             units=units,
             **kwargs
         )
 
-    __init__.__doc__ %= OFFSET_DOCSTRING
+    __init__.__doc__ %= (OFFSET_DOCSTRING,
+                         HEIGHTS_DOCSTRING,
+                         WIDTHS_DOCSTRING,
+                         ANGLE_DOCSTRING,
+                         UNITS_DOCSTRING,)

@@ -16,11 +16,15 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
-from hyperspy.drawing.markers import Markers
 from hyperspy.external.matplotlib.collections import RectangleCollection
+from hyperspy.drawing._markers._markers_with_widths_heights import _WidthsHeightsMarkers
+from hyperspy.docstrings.markers import (OFFSET_DOCSTRING,
+                                         UNITS_DOCSTRING,
+                                         HEIGHTS_DOCSTRING,
+                                         WIDTHS_DOCSTRING,
+                                         ANGLE_DOCSTRING)
 
-
-class Rectangles(Markers):
+class Rectangles(_WidthsHeightsMarkers):
     """A Collection of Rectangles Markers"""
 
     marker_type = "Rectangles"
@@ -30,16 +34,20 @@ class Rectangles(Markers):
         offsets,
         widths,
         heights,
+        angles=(0,),
+        units="xy",
         offsets_transform="data",
-        transform="display",
         **kwargs
     ):
         """Initialize the set of Segments Markers.
 
         Parameters
         ----------
-        rectangles: [n, 4] array-like or ragged array with shape (n, 4) at every navigation position
-            Defines the rectangle[[x1,y1,x2,y2], ...].
+        %s
+        %s
+        %s
+        %s
+        %s
         kwargs:
             Additional keyword arguments are passed to matplotlib.collections.PolyCollection.
         """
@@ -48,7 +56,15 @@ class Rectangles(Markers):
             offsets=offsets,
             widths=widths,
             heights=heights,
+            angles=angles,
+            units=units,
             offsets_transform=offsets_transform,
-            transform=transform,
             **kwargs
         )
+    __init__.__doc__ %= (OFFSET_DOCSTRING,
+                         WIDTHS_DOCSTRING,
+                         HEIGHTS_DOCSTRING,
+                         UNITS_DOCSTRING,
+                         ANGLE_DOCSTRING)
+
+

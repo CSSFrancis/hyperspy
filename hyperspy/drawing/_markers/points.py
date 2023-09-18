@@ -17,12 +17,13 @@
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
 from matplotlib.collections import CircleCollection
+from hyperspy.external.matplotlib.collections import EllipseCollection
 
-from hyperspy.drawing.markers import Markers
-from hyperspy.docstrings.markers import OFFSET_DOCSTRING
+from hyperspy.drawing._markers._markers_with_widths_heights import _EqualWidthsHeightsMarkers
+from hyperspy.docstrings.markers import OFFSET_DOCSTRING, UNITS_DOCSTRING
 
 
-class Points(Markers):
+class Points(_EqualWidthsHeightsMarkers):
     """A set of Points Markers."""
 
     marker_type = "Points"
@@ -30,9 +31,10 @@ class Points(Markers):
     def __init__(
         self,
         offsets,
-        sizes=2,
+        sizes,
+        angles=(0,),
+        units="x",
         offsets_transform="data",
-        transform="xaxis_scale",
         **kwargs
     ):
         """Initialize the set of points Markers.
@@ -40,16 +42,18 @@ class Points(Markers):
         Parameters
         ----------
         %s
+        %s
         kwargs : dict
                 Keyword arguments are passed to :py:class:`matplotlib.collections.CircleCollection`
         """
+
         super().__init__(
-            collection_class=CircleCollection,
+            collection_class=EllipseCollection,
             offsets=offsets,
             sizes=sizes,
+            angles=angles,
+            units=units,
             offsets_transform=offsets_transform,
-            transform=transform,
             **kwargs
         )
-
-    __init__.__doc__ %= OFFSET_DOCSTRING
+    __init__.__doc__ %= (OFFSET_DOCSTRING, UNITS_DOCSTRING)

@@ -1790,7 +1790,7 @@ class EELSSpectrum(Signal1D):
             self._edge_markers["text"] = Texts(offsets=np.empty((0, 2)),
                                                texts=np.empty((0,)),
                                                rotation=np.pi/2,
-                                               transform="relative")
+                                               offsets_transform="relative")
         self._edge_markers["text"].append_kwarg("offsets", offsets)
         self._edge_markers["text"].append_kwarg("texts", np.array(names))
         self._edge_markers["names"] = np.append(self._edge_markers["names"], names)

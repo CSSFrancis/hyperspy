@@ -28,9 +28,11 @@ class Texts(Markers):
 
     marker_type = "Texts"
 
-    def __init__(
-        self, offsets, offsets_transform="data", transform="display", **kwargs
-    ):
+    def __init__(self,
+                 offsets,
+                 offsets_transform="data",
+                 **kwargs
+                 ):
         """
         Initialize the set of Circle Markers.
 
@@ -47,11 +49,19 @@ class Texts(Markers):
         kwargs : dict
             Keyword arguments are passed to :py:class:`matplotlib.collections.CircleCollection`.
         """
+        if "transform" in kwargs and kwargs["transform"] is not "display":
+            raise ValueError(
+                "The transform argument is not supported for Texts Markers. Instead, "
+                "use the offsets_transform argument to specify the transform of the "
+                "offsets the size of the text will be in points and the transform of the "
+                "text will be defined by the ``rotation`` ``horizontalalignment`` and "
+                "``verticalalignment`` and ``sizes`` arguments."
+            )
+        kwargs["transform"] = "display"
         super().__init__(
             collection_class=TextCollection,
             offsets=offsets,
             offsets_transform=offsets_transform,
-            transform=transform,
             **kwargs
         )
 

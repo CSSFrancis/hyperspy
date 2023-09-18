@@ -529,9 +529,20 @@ class Markers:
     def get_data_position(
         self,
         get_static_kwargs=True,
+        get_modified=True
     ):
         """
         Return the current keyword arguments for updating the collection.
+
+        Parameters
+        ----------
+        get_static_kwargs: bool, optional, default True
+            If True, will return the all of the kwargs including those that are not iterating.
+            If False, will only return the kwargs that are iterating.
+        get_modified: bool, optional, default True
+            Get the modified kwargs.  This is useful for operations that change some of the kwargs
+            before plotting.  For example, if you want to scale the marker position by the current
+            data value using the "relative" transform.
         """
         current_keys = {}
         if self._is_iterating:
@@ -552,14 +563,15 @@ class Markers:
                 current_keys.update(self._get_cache_dask_kwargs_chunk(indices))
         else:
             current_keys = self.kwargs
-        # Handling relative markers
-        if (
-            self._offsets_transform == "relative" or self._transform == "relative"
-        ):  # scale based on current data
-            if "offsets" in current_keys:
-                current_keys = self._scale_kwarg(current_keys, "offsets")
-            if "segments" in current_keys:
-                current_keys = self._scale_kwarg(current_keys, "segments")
+        if get_modified:
+            # Handling relative markers
+            if (
+                self._offsets_transform == "relative" or self._transform == "relative"
+            ):  # scale based on current data
+                if "offsets" in current_keys:
+                    current_keys = self._scale_kwarg(current_keys, "offsets")
+                if "segments" in current_keys:
+                    current_keys = self._scale_kwarg(current_keys, "segments")
         return current_keys
 
     def _scale_kwarg(self, kwds, key):

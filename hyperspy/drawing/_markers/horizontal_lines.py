@@ -27,7 +27,7 @@ class HorizontalLines(Markers):
     marker_type = "HorizontalLines"
 
     def __init__(
-        self, offsets, offsets_transform="display", **kwargs
+        self, offsets, **kwargs
     ):
         """Initialize a set of HorizontalLines markers.
 
@@ -44,21 +44,34 @@ class HorizontalLines(Markers):
             raise ValueError(
                 "HorizontalLines markers must have transform='yaxis'."
             )
-        transform = "yaxis"
+        if "offsets_transform" in kwargs and kwargs["offsets_transform"] != "display":
+            raise ValueError(
+                "HorizontalLines markers must have offsets_transform='display'."
+            )
+        kwargs["transform"] = "yaxis"
+        kwargs["offsets_transform"] = "display"
         Markers.__init__(
             self,
             collection_class=LineCollection,
             offsets=offsets,
-            offsets_transform=offsets_transform,
-            transform=transform,
             **kwargs
         )
         self.name = self.__class__.__name__
 
-    def get_data_position(self, get_static_kwargs=True):
+    def get_data_position(self, get_static_kwargs=True, get_modified=True):
         kwargs = super().get_data_position(get_static_kwargs=get_static_kwargs)
-        x_extent = self.ax.get_xlim()
-        y_pos = kwargs.pop("offsets")
-        new_segments = np.array([[[x_extent[0], y], [x_extent[1], y]] for y in y_pos])
-        kwargs["segments"] = new_segments
-        return kwargs
+        if get_modified:
+            y_pos = kwargs.pop("offsets")
+            new_segments = np.array(
+                [
+                    [
+                        [0, y],
+                        [1, y],
+                    ]
+                    for y in y_pos
+                ]
+            )
+            kwargs["segments"] = new_segments
+            return kwargs
+        else:
+            return kwargs

@@ -17,12 +17,13 @@
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
 from matplotlib.collections import CircleCollection
+from hyperspy.external.matplotlib.collections import EllipseCollection
 
-from hyperspy.drawing.markers import Markers
-from hyperspy.docstrings.markers import OFFSET_DOCSTRING
+from hyperspy.drawing._markers._markers_with_widths_heights import _EqualWidthsHeightsMarkers
+from hyperspy.docstrings.markers import OFFSET_DOCSTRING, UNITS_DOCSTRING
 
 
-class Circles(Markers):
+class Circles(_EqualWidthsHeightsMarkers):
     """A set of Circle Markers."""
 
     marker_type = "Circles"
@@ -30,9 +31,10 @@ class Circles(Markers):
     def __init__(
         self,
         offsets,
-        sizes=2,
+        sizes,
+        angles=(0,),
         offsets_transform="data",
-        transform="xaxis_scale",
+        units="x",
         facecolors="none",
         **kwargs
     ):
@@ -49,17 +51,20 @@ class Circles(Markers):
             (all patches have same color), or a sequence of colors;
             if it is a sequence the patches will cycle through the sequence.
             If c is 'none', the patch will not be filled.
+        %s
         kwargs : dict
             Keyword arguments are passed to :py:class:`matplotlib.collections.CircleCollection`.
         """
+
         super().__init__(
-            collection_class=CircleCollection,
+            collection_class=EllipseCollection,
             offsets=offsets,
             sizes=sizes,
+            angles=angles,
+            units=units,
             facecolors=facecolors,
             offsets_transform=offsets_transform,
-            transform=transform,
             **kwargs
         )
 
-    __init__.__doc__ %= OFFSET_DOCSTRING
+    __init__.__doc__ %= (OFFSET_DOCSTRING, UNITS_DOCSTRING)

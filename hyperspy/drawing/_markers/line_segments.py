@@ -26,7 +26,7 @@ class Lines(Markers):
     marker_type = "Lines"
 
     def __init__(
-        self, segments, offsets_transform="display", transform="data", **kwargs
+        self, segments, transform="data", **kwargs
     ):
         """Initialize the set of Segments Markers.
 
@@ -37,10 +37,16 @@ class Lines(Markers):
         kwargs:
             Additional keyword arguments are passed to matplotlib.collections.LineCollection.
         """
+        if "offsets_transform" in kwargs and kwargs["offsets_transform"] != "display":
+            raise ValueError(
+                "The offsets_transform argument is not supported for Lines Markers. Instead, "
+                "use the ``transform`` argument to specify the transform of the "
+                "markers."
+            )
+        kwargs["offsets_transform"] = "display"
         super().__init__(
             collection_class=LineCollection,
             segments=segments,
-            offsets_transform=offsets_transform,
             transform=transform,
             **kwargs
         )
