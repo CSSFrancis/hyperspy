@@ -19,6 +19,7 @@
 import pytest
 import numpy as np
 from scipy.stats import norm
+from skimage.morphology import disk
 
 from hyperspy.signals import Signal2D, BaseSignal, Signal1D
 from hyperspy._signals.lazy import LazySignal
@@ -93,7 +94,7 @@ def _get_disc():
 
 PEAK_METHODS = ['local_max', 'max', 'minmax', 'zaefferer', 'stat',
                 'laplacian_of_gaussian', 'difference_of_gaussian',
-                'template_matching']
+                ]
 DATASETS = _generate_dataset()
 DATASETS_NAME = ["dense", "sparse_nav0d", "sparse_nav1d", "sparse_nav2d"]
 DISC = _get_disc()
@@ -115,19 +116,20 @@ class TestFindPeaks2D:
     @pytest.mark.parametrize('method', PEAK_METHODS)
     @pytest.mark.parametrize('dataset_name', DATASETS_NAME)
     @pytest.mark.parametrize('get_intensity', [True, False])
-    def test_find_peaks(self, method, dataset_name, get_intensity):
+    @pytest.mark.parametrize('template', [None, DISC])
+    def test_find_peaks(self, method, dataset_name, get_intensity, template):
         if method == 'stat':
             pytest.importorskip("sklearn")
         dataset = getattr(self, dataset_name)
-
-        if method == 'template_matching':
+        if template is not None:
             peaks = dataset.find_peaks(method=method,
-                                       interactive=False, template=DISC,
-                                       get_intensity=get_intensity)
+                                   interactive=False,
+                                   get_intensity=get_intensity,
+                                   template=template)
         else:
             peaks = dataset.find_peaks(method=method,
-                                       interactive=False,
-                                       get_intensity=get_intensity)
+                                   interactive=False,
+                                   get_intensity=get_intensity)
         assert isinstance(peaks, BaseSignal)
         if isinstance(dataset,LazySignal):
             assert isinstance(peaks, LazySignal)

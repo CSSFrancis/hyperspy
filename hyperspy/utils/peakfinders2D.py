@@ -17,6 +17,7 @@
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
 import copy
+import functools
 
 from numba import njit
 import numpy as np
@@ -26,6 +27,7 @@ from skimage.feature import blob_dog, blob_log, match_template, peak_local_max
 from hyperspy.misc.machine_learning import import_sklearn
 
 NO_PEAKS = np.array([[np.nan, np.nan]])
+
 
 def _get_peak_position_and_intensity(X, f, **kwargs):
     """
@@ -50,14 +52,42 @@ def _get_peak_position_and_intensity(X, f, **kwargs):
     """
     peaks = f(X, **kwargs)
 
-    if np.any(np.isnan(peaks)): #handle no peaks
-        return np.array([[np.nan, np.nan,np.nan]])
+    if np.any(np.isnan(peaks)):  # handle no peaks
+        return np.array([[np.nan, np.nan, np.nan]])
     else:
         peaks_indices = np.round(peaks).astype(int)
         intensity = X[peaks_indices[:, 0], peaks_indices[:, 1]]
 
         return np.concatenate([peaks, intensity[:, np.newaxis]], axis=1)
 
+
+def template_match_decorator(func):
+    @functools.wraps(func)
+    def correlate(*args, **kwargs):
+        if "template" in kwargs:
+            template = kwargs.pop("template")
+            if "z" in kwargs:
+                z = kwargs["z"]
+            else:
+                z = args[0]
+            pad_input = kwargs.pop("pad_input", True)
+            mode = kwargs.pop("mode", "constant")
+            constant_values = kwargs.pop("constant_values", 0)
+            temp = match_template(z,
+                                  template,
+                                  pad_input=pad_input,
+                                  mode=mode,
+                                  constant_values=constant_values)
+            if "z" in kwargs:
+                kwargs["z"] = temp
+            else:
+                args = (temp,) + args[1:]
+        # getting the returned value
+        returned_value = func(*args, **kwargs)
+        # returning the value to the original frame
+        return returned_value
+
+    return correlate
 
 @njit(cache=True)
 def _fast_mean(X):  # pragma: no cover
@@ -125,10 +155,11 @@ def clean_peaks(peaks):
     if len(peaks) == 0:
         return NO_PEAKS
     else:
-        ind = np.lexsort((peaks[:,0], peaks[:,1]))
+        ind = np.lexsort((peaks[:, 0], peaks[:, 1]))
         return peaks[ind]
 
 
+@template_match_decorator
 def find_local_max(z, **kwargs):
     """Method to locate positive peaks in an image by local maximum searching.
 
@@ -153,6 +184,7 @@ def find_local_max(z, **kwargs):
     return clean_peaks(peaks)
 
 
+@template_match_decorator
 def find_peaks_minmax(z, distance=5., threshold=10.):
     """Method to locate the positive peaks in an image by comparing maximum
     and minimum filtered images.
@@ -184,6 +216,7 @@ def find_peaks_minmax(z, distance=5., threshold=10.):
     return clean_peaks(np.round(peaks).astype(int))
 
 
+@template_match_decorator
 def find_peaks_max(z, alpha=3., distance=10):
     """Method to locate positive peaks in an image by local maximum searching.
 
@@ -229,6 +262,7 @@ def find_peaks_max(z, alpha=3., distance=10):
     return clean_peaks(peaks)
 
 
+@template_match_decorator
 def find_peaks_zaefferer(z, grad_threshold=0.1, window_size=40,
                          distance_cutoff=50.):
     """Method to locate positive peaks in an image based on gradient
@@ -332,6 +366,7 @@ def find_peaks_zaefferer(z, grad_threshold=0.1, window_size=40,
     return clean_peaks(peaks)
 
 
+@template_match_decorator
 def find_peaks_stat(z, alpha=1.0, window_radius=10, convergence_ratio=0.05):
     """Method to locate positive peaks in an image based on statistical
     refinement and difference with respect to mean intensity.
@@ -475,6 +510,7 @@ def find_peaks_stat(z, alpha=1.0, window_radius=10, convergence_ratio=0.05):
     return clean_peaks(stat_peak_finder(z, convergence_ratio))
 
 
+@template_match_decorator
 def find_peaks_dog(z, min_sigma=1., max_sigma=50., sigma_ratio=1.6,
                    threshold=0.2, overlap=0.5, exclude_border=False):
     """Method to locate peaks via the Difference of Gaussian Matrices method.
@@ -518,6 +554,7 @@ def find_peaks_dog(z, min_sigma=1., max_sigma=50., sigma_ratio=1.6,
     return clean_peaks(np.array(clean_centers))
 
 
+@template_match_decorator
 def find_peaks_log(z, min_sigma=1., max_sigma=50., num_sigma=10,
                    threshold=0.2, overlap=0.5, log_scale=False,
                    exclude_border=False):

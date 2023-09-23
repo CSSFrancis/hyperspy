@@ -921,6 +921,7 @@ class Signal2D(BaseSignal, CommonSignal2D):
         ramp += ramp_y * yy
         self.data += ramp
 
+
     def find_peaks(self, method='local_max', interactive=True,
                    current_index=False, show_progressbar=None,
                    num_workers=None, display=True, toolkit=None,
@@ -1010,8 +1011,8 @@ class Signal2D(BaseSignal, CommonSignal2D):
             'stat': find_peaks_stat,
             'laplacian_of_gaussian':  find_peaks_log,
             'difference_of_gaussian': find_peaks_dog,
-            'template_matching' : find_peaks_xc,
         }
+
         # As a convenience, we map 'distance' to 'min_distance' and
         # 'threshold' to 'threshold_abs' when using the 'local_max' method to
         # match with the arguments of skimage.feature.peak_local_max.
@@ -1026,6 +1027,8 @@ class Signal2D(BaseSignal, CommonSignal2D):
             raise NotImplementedError(f"The method `{method}` is not "
                                       "implemented. See documentation for "
                                       "available implementations.")
+
+
         if get_intensity:
             method_func = partial(_get_peak_position_and_intensity, f=method_func, )
         if interactive:

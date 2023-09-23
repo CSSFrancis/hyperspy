@@ -26,6 +26,8 @@ import matplotlib.text as mpl_text
 import numpy as np
 from scipy import interpolate
 from scipy import signal as sp_signal
+from skimage.morphology import disk
+from skimage.feature.template import match_template
 import traits.api as t
 
 from hyperspy import drawing
@@ -2066,11 +2068,11 @@ class PeaksFinder2D(t.HasTraits):
         'Stat',
         'Laplacian of Gaussian',
         'Difference of Gaussian',
-        'Template matching',
         default='Local Max')
+
     # For "Local max" method
     local_max_distance = t.Range(1, 20, value=3)
-    local_max_threshold = t.Range(0, 20., value=10)
+    local_max_threshold = t.Range(0, 20., value=1)
     # For "Max" method
     max_alpha = t.Range(0, 6., value=3)
     max_distance = t.Range(1, 20, value=10)
@@ -2099,9 +2101,11 @@ class PeaksFinder2D(t.HasTraits):
     dog_threshold = t.Range(0, 0.4, value=0.2)
     dog_overlap = t.Range(0, 1., value=0.5)
     # For "Cross correlation" method
-    xc_template = None
-    xc_distance = t.Range(0, 100., value=5.)
-    xc_threshold = t.Range(0, 10., value=0.5)
+    disk_radius = t.Range(1, 20, value=5)
+    template_match = t.Bool(False)
+    #xc_template = None
+    #xc_distance = t.Range(0, 100., value=5.)
+    #xc_threshold = t.Range(0, 10., value=0.5)
 
     random_navigation_position = t.Button()
     compute_over_navigation_axes = t.Button()
@@ -2146,11 +2150,6 @@ class PeaksFinder2D(t.HasTraits):
             'dog_threshold': 'threshold',
             'dog_overlap': 'overlap',
             }
-        self._attribute_argument_mapping_local_xc = {
-            'xc_template': 'template',
-            'xc_distance': 'distance',
-            'xc_threshold': 'threshold',
-            }
 
         self._attribute_argument_mapping_dict = {
             'local_max': self._attribute_argument_mapping_local_max,
@@ -2160,7 +2159,6 @@ class PeaksFinder2D(t.HasTraits):
             'stat': self._attribute_argument_mapping_local_stat,
             'laplacian_of_gaussian': self._attribute_argument_mapping_local_log,
             'difference_of_gaussian': self._attribute_argument_mapping_local_dog,
-            'template_matching': self._attribute_argument_mapping_local_xc,
             }
 
         if signal.axes_manager.signal_dimension != 2:
@@ -2184,7 +2182,9 @@ class PeaksFinder2D(t.HasTraits):
         # As a convenience, if the template argument is provided, we keep it
         # even if the method is different, to be able to use it later.
         if 'template' in kwargs.keys():
-            self.xc_template = kwargs['template']
+            self._xc_template = kwargs['template']
+        else:
+            self._xc_template = None
         if method is not None:
             method_dict = {'local_max':'Local max',
                            'max':'Max',
@@ -2192,8 +2192,7 @@ class PeaksFinder2D(t.HasTraits):
                            'zaefferer':'Zaefferer',
                            'stat':'Stat',
                            'laplacian_of_gaussian':'Laplacian of Gaussian',
-                           'difference_of_gaussian':'Difference of Gaussian',
-                           'template_matching':'Template matching'}
+                           'difference_of_gaussian':'Difference of Gaussian'}
             self.method = method_dict[method]
         self._parse_paramaters_initial_values(**kwargs)
         self._update_peak_finding()
@@ -2212,6 +2211,13 @@ class PeaksFinder2D(t.HasTraits):
         self._find_peaks_current_index(method=method)
         self._plot_markers()
 
+    @property
+    def xc_template(self):
+        if self._xc_template is None:
+            return disk(self.disk_radius)
+        else:
+            return self._xc_template
+
     def _method_changed(self, old, new):
         if new == 'Template matching' and self.xc_template is None:
             raise RuntimeError('The "template" argument is required.')
@@ -2224,12 +2230,17 @@ class PeaksFinder2D(t.HasTraits):
         for parameters_mapping in self._attribute_argument_mapping_dict.values():
             for parameter in list(parameters_mapping.keys()):
                 self.on_trait_change(self._parameter_changed, parameter)
+        for p in ["disk_radius", "template_match"]:
+            self.on_trait_change(self._parameter_changed, p)
 
     def _get_parameters(self, method):
         # Get the attribute to argument mapping for the given method
         arg_mapping = self._attribute_argument_mapping_dict[method]
+        parameters = {arg: getattr(self, attr) for attr, arg in arg_mapping.items()}
+        if self.template_match:
+            parameters['template'] = self.xc_template
         # return argument and values as kwargs
-        return {arg: getattr(self, attr) for attr, arg in arg_mapping.items()}
+        return parameters
 
     def _normalise_method_name(self, method):
         return method.lower().replace(' ', '_')
