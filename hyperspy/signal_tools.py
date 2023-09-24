@@ -2072,13 +2072,13 @@ class PeaksFinder2D(t.HasTraits):
 
     # For "Local max" method
     local_max_distance = t.Range(1, 20, value=3)
-    local_max_threshold = t.Range(0, 20., value=1)
+    local_max_threshold = t.Range(0., value=10)
     # For "Max" method
     max_alpha = t.Range(0, 6., value=3)
     max_distance = t.Range(1, 20, value=10)
     # For "Minmax" method
     minmax_distance = t.Range(0, 6., value=3)
-    minmax_threshold = t.Range(0, 20., value=10)
+    minmax_threshold = t.Range(0., value=10)
     # For "Zaefferer" method
     zaefferer_grad_threshold = t.Range(0, 0.2, value=0.1)
     zaefferer_window_size = t.Range(2, 80, value=40)
@@ -2178,6 +2178,8 @@ class PeaksFinder2D(t.HasTraits):
             self.signal.axes_manager.events.indices_changed.connect(
                 self._update_peak_finding, [])
             self.signal._plot.signal_plot.events.closed.connect(self.disconnect, [])
+
+        self.local_max_threshold = np.max(self.signal()) / 2
         # Set initial parameters:
         # As a convenience, if the template argument is provided, we keep it
         # even if the method is different, to be able to use it later.

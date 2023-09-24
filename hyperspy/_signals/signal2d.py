@@ -1039,6 +1039,7 @@ class Signal2D(BaseSignal, CommonSignal2D):
             peaks = BaseSignal(np.empty(self.axes_manager.navigation_shape),
                                axes=axes_dict)
             pf2D = PeaksFinder2D(self, method=method, peaks=peaks, **kwargs)
+            self.pf2D = pf2D
             pf2D.gui(display=display, toolkit=toolkit)
         elif current_index:
             peaks = method_func(self.__call__(), **kwargs)
