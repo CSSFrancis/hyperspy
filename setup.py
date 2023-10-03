@@ -43,7 +43,6 @@ install_req = [
     'matplotlib>=3.1.3',
     'natsort',
     # non-uniform axis requirement
-    'numba>=0.52',
     'numexpr',
     'numpy>=1.20.0',
     'packaging',
@@ -63,7 +62,8 @@ install_req = [
 
 
 extras_require = {
-	"ipython": ["IPython>7.0, !=8.0", "ipyparallel"],
+    "fast": ['numba>=0.52', ],
+    "ipython": ["IPython>7.0, !=8.0", "ipyparallel"],
     "learning": ["scikit-learn>=1.0.1"],
     "gui-jupyter": ["hyperspy_gui_ipywidgets>=1.1.0", "ipympl"],
     # UPDATE BEFORE RELEASE
@@ -79,7 +79,7 @@ extras_require = {
     "coverage":["pytest-cov"],
     # required to build the docs
     "build-doc": [
-        "distributed", # requires for running scripts in the gallery
+        "distributed",  # requires for running scripts in the gallery
         "pydata_sphinx_theme",
         "sphinx>=1.7",
         "sphinx-gallery",
