@@ -71,8 +71,8 @@ def _matplotlib_pick_event(figure, click, artist):
         figure.canvas.pick_event(figure.canvas, click, artist)
 
 
-@pytest.fixture
-def setup_teardown(request, scope="class"):
+@pytest.fixture(scope="module")
+def setup_teardown(request):
     plot_testing = request.config.getoption("--mpl")
     try:
         import pytest_mpl
