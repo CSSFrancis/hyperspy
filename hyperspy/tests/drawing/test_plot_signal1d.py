@@ -56,8 +56,8 @@ def _generate_filename_list(style):
     return filename_list2
 
 
-@pytest.fixture
-def setup_teardown(request, scope="class"):
+@pytest.fixture(scope="module")
+def setup_teardown(request):
     try:
         import pytest_mpl
         # This option is available only when pytest-mpl is installed
