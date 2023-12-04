@@ -311,7 +311,7 @@ class LazySignal(BaseSignal):
         self._cache_dask_chunk = None
         self._cache_dask_chunk_slice = None
 
-    def _get_dask_chunks(self, axis=None, dtype=None):
+    def _get_dask_chunks(self, axis=None, dtype=None, chunks=None):
         """Returns dask chunks.
 
         Aims:
@@ -331,6 +331,8 @@ class LazySignal(BaseSignal):
         -------
         Tuple of tuples, dask chunks
         """
+        if chunks is not None:
+            return chunks
         dc = self.data
         dcshape = dc.shape
         for _axis in self.axes_manager._axes:
@@ -423,7 +425,7 @@ class LazySignal(BaseSignal):
 
     get_chunk_size.__doc__ %= (MANY_AXIS_PARAMETER)
 
-    def _make_lazy(self, axis=None, rechunk=False, dtype=None):
+    def _make_lazy(self, axis=None, rechunk=False, dtype=None, **kwargs):
         self.data = self._lazy_data(axis=axis, rechunk=rechunk, dtype=dtype)
 
     def change_dtype(self, dtype, rechunk=False):
@@ -440,7 +442,7 @@ class LazySignal(BaseSignal):
 
     change_dtype.__doc__ = BaseSignal.change_dtype.__doc__
 
-    def _lazy_data(self, axis=None, rechunk=False, dtype=None):
+    def _lazy_data(self, axis=None, rechunk=False, dtype=None, **kwargs):
         """Return the data as a dask array, rechunked if necessary.
 
         Parameters
@@ -456,7 +458,9 @@ class LazySignal(BaseSignal):
             necessary using dask's automatic chunk guessing.
 
         """
-        if rechunk == "dask_auto":
+        if "chunks" in kwargs:
+            new_chunks = kwargs.pop("chunks")
+        elif rechunk == "dask_auto":
             new_chunks = "auto"
         else:
             new_chunks = self._get_dask_chunks(axis=axis, dtype=dtype)
@@ -473,7 +477,7 @@ class LazySignal(BaseSignal):
                 data = np.where(self.data.mask, np.nan, self.data)
             else:
                 data = self.data
-            res = da.from_array(data, chunks=new_chunks)
+            res = da.from_array(data, chunks=new_chunks, **kwargs)
         assert isinstance(res, da.Array)
         return res
 

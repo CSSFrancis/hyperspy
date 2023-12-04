@@ -2426,7 +2426,7 @@ class BaseSignal(FancySlicing,
                 self.learning_results = old_learning_results
 
     def as_lazy(self, copy_variance=True, copy_navigator=True,
-                copy_learning_results=True):
+                copy_learning_results=True,**kwargs):
         """
         Create a copy of the given Signal as a
         :py:class:`~hyperspy._signals.lazy.LazySignal`.
@@ -2442,6 +2442,9 @@ class BaseSignal(FancySlicing,
         copy_learning_results : bool
             Whether to copy the learning_results from the original signal to
             the new lazy version. Default is True.
+        kwargs : dict
+            Additional keyword arguments passed to the :func:`dask.array.from_array`
+            function.
 
         Returns
         -------
@@ -2455,7 +2458,7 @@ class BaseSignal(FancySlicing,
             copy_learning_results=copy_learning_results
             )
         res._lazy = True
-        res._assign_subclass()
+        res._assign_subclass(**kwargs)
         return res
 
     def _summary(self):
@@ -5073,8 +5076,11 @@ class BaseSignal(FancySlicing,
             lazy_output = self._lazy
 
         if not self._lazy:
-            s_input = self.as_lazy()
-            s_input.rechunk(nav_chunks=navigation_chunks)
+            if not isinstance(navigation_chunks, tuple):
+                navigation_chunks = (navigation_chunks,) * len(self.axes_manager.navigation_shape)
+            sig_chunks = (-1,) * len(self.axes_manager.signal_shape)
+            new_chunks = navigation_chunks + sig_chunks
+            s_input = self.as_lazy(chunks=new_chunks)
         else:
             s_input = self
 
@@ -5806,7 +5812,7 @@ class BaseSignal(FancySlicing,
             out.events.data_changed.trigger(obj=out)
     as_signal2D.__doc__ %= (OUT_ARG, OPTIMIZE_ARG.replace('False', 'True'))
 
-    def _assign_subclass(self):
+    def _assign_subclass(self, **kwargs):
         mp = self.metadata
         self.__class__ = assign_signal_subclass(
             dtype=self.data.dtype,
@@ -5819,7 +5825,7 @@ class BaseSignal(FancySlicing,
             mp.Signal.signal_type = self._signal_type  # set to default!
         self.__init__(self.data, full_initialisation=False)
         if self._lazy:
-            self._make_lazy()
+            self._make_lazy(**kwargs)
 
     def set_signal_type(self, signal_type=""):
         """Set the signal type and convert the current signal accordingly.
