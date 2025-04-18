@@ -1016,7 +1016,9 @@ class CachedDaskArray:
             if force_compute or np.all([c.done() for c in self.core_cached_blocks]):
                 return np.sum([r.result() for r in results], axis=0)
             else:
-                return
+                return self.client.submit(
+                    lambda *args: np.sum(args, axis=0), *results
+                )
 
         elif distributed_installed and self.client is not None:
             for i, c in enumerate(self.core_cached_blocks):
