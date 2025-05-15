@@ -714,7 +714,7 @@ def _get_navigation_dimension_chunk_slice(
 
     n_dim = navigation_indices.shape[1]
     block_indexes = np.meshgrid(
-        *[np.arange(0, len(n) - 1) for n in zip(chunks, range(n_dim))]
+        *[np.arange(0, len(c) - 1) for c, n in zip(chunks, range(n_dim))]
     )  # only for n_dim
     cum_sum_chunks = [np.cumsum(chunks) for chunks in chunks]
     if n_dim == 0:

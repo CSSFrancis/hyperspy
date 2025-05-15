@@ -498,7 +498,7 @@ class LazySignal(BaseSignal):
             s._remove_axis([ax.index_in_axes_manager for ax in axes])
             return s
 
-    def _get_cache_dask_chunk(self, indices, get_result=True):
+    def _get_cache_dask_chunk(self, indices, get_result=True, scale=1):
         """Method for handling caching of dask chunks, when using __call__.
 
         When accessing data in a chunked HDF5 file, the whole chunks needs

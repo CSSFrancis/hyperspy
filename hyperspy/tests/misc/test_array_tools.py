@@ -29,7 +29,10 @@ from hyperspy.misc.array_tools import (
     numba_histogram,
     round_half_away_from_zero,
     round_half_towards_zero,
+    _get_navigation_dimension_chunk_slice,
 )
+
+from hyperspy.signals import Signal2D
 
 dt = [("x", np.uint8), ("y", np.uint16), ("text", (bytes, 6))]
 
@@ -232,3 +235,68 @@ def test_get_value_at_index_fail():
             norm="log",
             minimum_intensity=None,
         )
+
+class TestCachedArray:
+    @pytest.mark.parametrize("index", ([0,0], [3,4], [2,3],))
+    def test_get_navigation_dimension_chunk_slice(self, index):
+        arr = da.zeros((6, 8, 10, 20), chunks=(2, 2, -1, -1))
+        index = np.array([index])
+        cb, sb, inds = _get_navigation_dimension_chunk_slice(navigation_indices=index,
+                                              chunks=arr.chunks,
+                                              surrounding_blocks=1)
+        assert cb == [tuple(index[0]//2),]
+        if np.array_equal(index,[0, 0]):
+            assert sb == [(0, 1), (0, 1), (0, 1)]
+        ind = index[0] % 2
+        np.testing.assert_array_equal(inds[0], np.array([ind,]))
+
+
+    @pytest.mark.parametrize("index", ([0,0], [3,4], [2,3],))
+    def test_get_navigation_dimension_chunk_slice_signal_chunked(self, index):
+        arr = da.zeros((6, 8, 10, 20), chunks=(2, 8, 5, -1))
+        index = np.array([index])
+        cb, sb, inds = _get_navigation_dimension_chunk_slice(navigation_indices=index,
+                                              chunks=arr.chunks,
+                                              surrounding_blocks=1)
+        assert cb == [(index[0,0]//2, index[0,1]//8),]
+        if np.array_equal(index, [0, 0]):
+            assert sb == [(0, 1), (0, 1), (0, 1)]
+        ind = [index[0,0] % 2,index[0,1] % 8]
+        np.testing.assert_array_equal(inds[0], np.array([ind,]))
+
+    @pytest.mark.parametrize("index", ([0, 0,0], [3, 4,2], [2, 3,2],))
+    def test_get_navigation_dimension_chunk_slice_signal_3d(self, index):
+        arr = da.zeros((6, 8, 10,12, 20), chunks=(2, 2, 5, -1, -1))
+        index = np.array([index])
+        cb, sb, inds = _get_navigation_dimension_chunk_slice(navigation_indices=index,
+                                                             chunks=arr.chunks,
+                                                             surrounding_blocks=1)
+        assert cb == [(index[0, 0,] // 2, index[0, 1] // 2,  index[0, 2] // 5)]
+        if np.array_equal(index, [0, 0, 0]):
+            assert sb == [(0, 0, 1), (0, 1, 1), (1, 1, 1), (1, 0, 1), (1, 1, 0)]
+        ind = [index[0, 0] % 2, index[0, 1] % 2, index[0, 2] % 5]
+        np.testing.assert_array_equal(inds[0], np.array([ind, ]))
+
+
+    @pytest.mark.parametrize("index", ([0, 0,0], [3, 4,2], [2, 3,2],))
+    def test_get_navigation_dimension_chunk_slice_signal_3d_2(self, index):
+        arr = da.zeros((6, 8, 10,12, 20), chunks=(2, 8, 5, -1, -1))
+        index = np.array([index])
+        cb, sb, inds = _get_navigation_dimension_chunk_slice(navigation_indices=index,
+                                                             chunks=arr.chunks,
+                                                             surrounding_blocks=1)
+        assert cb == [(index[0, 0,] // 2, index[0, 1] // 8,  index[0, 2] // 5)]
+        if np.array_equal(index, [0, 0, 0]):
+            assert sb == [(0, 0, 1), (0, 1, 1), (1, 1, 1), (1, 0, 1), (1, 1, 0)]
+        ind = [index[0, 0] % 2, index[0, 1] % 8, index[0, 2] % 5]
+        np.testing.assert_array_equal(inds[0], np.array([ind, ]))
+
+
+    @pytest.mark.parametrize("index", ([0, 0,0], [3, 4,2], [2, 3,2],))
+    def test_cache(self, index):
+        arr = da.zeros((6, 8, 10,12, 20), chunks=(2, 2, 5, -1, -1))
+        s = Signal2D(arr).as_lazy()
+        index = np.array([index])
+        s._get_cache_dask_chunk(index, get_result=True)
+
+
