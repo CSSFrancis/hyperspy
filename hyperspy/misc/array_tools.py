@@ -1014,14 +1014,15 @@ class CachedDaskArray:
                     )
                 )
             if force_compute or np.all([c.done() for c in self.core_cached_blocks]):
-                return np.mean(
-                    [r.result() for r in results], axis=0, dtype=self.array.dtype
+                future = self.client.submit(
+                    lambda *args: np.mean(args, axis=0, dtype=self.array.dtype),
+                    *results,
                 )
+                return future.result()
             else:
                 return self.client.submit(
-                    lambda *args: np.mean(args, axis=0),
+                    lambda *args: np.mean(args, axis=0, dtype=self.array.dtype),
                     *results,
-                    dtype=self.array.dtype,
                 )
 
         elif distributed_installed and self.client is not None:
