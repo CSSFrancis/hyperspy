@@ -3108,11 +3108,11 @@ class BaseSignal(
 
         self._plot.axes_manager = axes_manager
         if hasattr(self, "client") and self.client is not None:
-            get_result = True
+            get_result = False  # non-blocking when using dask.distributed
         else:
-            get_result = False
+            get_result = True  # blocking when using local dask
         _logger.info(f"Get Result:{get_result}")
-
+        print("Generating plot.. Get Result: ", get_result)
         self._plot.signal_data_function = partial(
             self._get_current_data, as_numpy=True, get_result=get_result
         )
