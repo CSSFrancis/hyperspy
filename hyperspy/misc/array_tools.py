@@ -1016,9 +1016,7 @@ class CachedDaskArray:
             if force_compute or np.all([c.done() for c in self.core_cached_blocks]):
                 return np.sum([r.result() for r in results], axis=0)
             else:
-                return self.client.submit(
-                    lambda *args: np.sum(args, axis=0), *results
-                )
+                return self.client.submit(lambda *args: np.sum(args, axis=0), *results)
 
         elif distributed_installed and self.client is not None:
             for i, c in enumerate(self.core_cached_blocks):
@@ -1052,6 +1050,8 @@ class CachedDaskArray:
 
 def get_inds(arrs, indices, sum_data=True):
     if sum_data:
-        return np.sum(arrs[indices], axis=0)
+        return np.mean(
+            arrs[indices], axis=0, dtype=arrs.dtype
+        )  # maintain dtype for plotting...
     else:
         return arrs[indices]
