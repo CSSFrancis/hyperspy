@@ -498,7 +498,7 @@ class LazySignal(BaseSignal):
             s._remove_axis([ax.index_in_axes_manager for ax in axes])
             return s
 
-    def _get_cache_dask_chunk(self, indices, get_result=True):
+    def _get_cache_dask_chunk(self, indices, get_result=True, return_future=False):
         """Method for handling caching of dask chunks, when using __call__.
 
         When accessing data in a chunked HDF5 file, the whole chunks needs
@@ -526,6 +526,12 @@ class LazySignal(BaseSignal):
         indices : tuple
             Must be the same length as navigation dimensions in self.
 
+        get_result : bool, default True
+            If True, returns the actual NumPy array. If False, returns a
+            dask future if the computation isn't done yet,
+        return_future : bool, default False
+            If True, always returns a dask future even if get_result is True.
+
         Returns
         -------
         value : NumPy array
@@ -548,6 +554,7 @@ class LazySignal(BaseSignal):
             force_compute=get_result,
             nav_dim=len(self.axes_manager.navigation_axes),
             sum_data=True,
+            return_future=return_future,
         )
         return res
 

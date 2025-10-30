@@ -887,7 +887,13 @@ class CachedDaskArray:
             return None
 
     def get_index(
-        self, indices, nav_dim, force_compute=True, sum_data=True, data_on_workers=True
+        self,
+        indices,
+        nav_dim,
+        force_compute=True,
+        sum_data=True,
+        data_on_workers=True,
+        return_future=False,
     ):
         """
         The first time that a dask result is called the chunk is loaded into memory
@@ -903,6 +909,29 @@ class CachedDaskArray:
          -------------                    -----------
         | Numpy Cache | <-(100-1000ms)- | Hard Disk |
          -------------                   -----------
+
+        Parameters
+        ----------
+        indices : list of tuples
+            The navigation indices to get.
+        nav_dim : int
+            The number of navigation dimensions.
+        force_compute : bool
+            Whether to force computation of the data even if using distributed
+            scheduler.
+        sum_data : bool
+            Whether to sum the data in the signal dimensions.
+        data_on_workers : bool
+            Whether the data is stored on the workers when using distributed
+            scheduler.
+        return_future : bool
+            Whether to return a Future when using distributed scheduler.
+        Returns
+        -------
+        numpy array or dask Future
+        The data at the given indices. If multiple indices are given, the mean
+        over the indices is returned with the same dtype as the original array. This
+        is meant to avoid upcasting and to help with plotting/memory usage.
 
         """
         try:
@@ -1017,7 +1046,10 @@ class CachedDaskArray:
                 future = self.client.submit(
                     np.mean, results, axis=0, dtype=self.array.dtype
                 )
-                return future.result()
+                if return_future:
+                    return future
+                else:
+                    return future.result()
             else:
                 return self.client.submit(
                     np.mean, results, axis=0, dtype=self.array.dtype
