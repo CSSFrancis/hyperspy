@@ -1042,18 +1042,16 @@ class CachedDaskArray:
                         sum_data=sum_data,
                     )
                 )
+            # Combine per-block (sum, count) with a weighted mean and round only at the end
+            future = self.client.submit(
+                weighted_mean_round_from_sums, results, self.array.dtype
+            )
+            if return_future:
+                return future
             if force_compute or np.all([c.done() for c in self.core_cached_blocks]):
-                future = self.client.submit(round_mean, results, axis=0)
-                if return_future:
-                    return future
-                else:
-                    return future.result()
+                return future.result()
             else:
-                return self.client.submit(
-                    round_mean,
-                    results,
-                    axis=0,
-                )
+                return future
 
         elif distributed_installed and self.client is not None:
             for i, c in enumerate(self.core_cached_blocks):
@@ -1080,16 +1078,16 @@ class CachedDaskArray:
             arrays.append(self.core_cached_blocks[b_ind][slices])
         arrays = np.vstack(arrays)
         if sum_data:
-            return np.sum(arrays, axis=0)
+            return np.mean(arrays, axis=0)
         else:
             return arrays
 
 
 def get_inds(arrs, indices, sum_data=True):
     if sum_data:
-        return np.mean(
-            arrs[indices], axis=0, dtype=arrs.dtype
-        )  # maintain dtype for plotting...
+        sub = arrs[indices]
+        # Sum in float64 to avoid integer overflow; return count for weighting
+        return (np.sum(sub, axis=0, dtype=np.float64), sub.shape[0])
     else:
         return arrs[indices]
 
@@ -1118,3 +1116,25 @@ def round_mean(array, axis=0):
         return np.rint(np.mean(array, axis=axis)).astype(dtyp)
     else:
         return np.mean(array, axis=axis)
+
+
+def weighted_mean_round_from_sums(pairs, target_dtype=None):
+    """
+    Combine a list of (sum, count) pairs into a weighted mean.
+    Round back to integer if target_dtype is integer.
+    """
+    total_sum = None
+    total_count = 0
+    for s, c in pairs:
+        if total_sum is None:
+            total_sum = s
+        else:
+            total_sum = total_sum + s
+        total_count += int(c)
+    if total_count == 0:
+        # preserve shape if possible
+        return total_sum
+    mean = total_sum / float(total_count)
+    if target_dtype is not None and np.issubdtype(target_dtype, np.integer):
+        return np.rint(mean).astype(target_dtype)
+    return mean
