@@ -1110,7 +1110,11 @@ def round_mean(array, axis=0):
         Mean of the input array along the specified axis, rounded if the
         input array is of integer type.
     """
-    if np.issubdtype(array.dtype, np.integer):
+    if isinstance(array, list):
+        dtyp = array[0].dtype
+    else:
+        dtyp = array.dtype
+    if np.issubdtype(dtyp, np.integer):
         return np.rint(np.mean(array, axis=axis)).astype(array.dtype)
     else:
         return np.mean(array, axis=axis)
