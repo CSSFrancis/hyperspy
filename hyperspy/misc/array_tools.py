@@ -1115,6 +1115,6 @@ def round_mean(array, axis=0):
     else:
         dtyp = array.dtype
     if np.issubdtype(dtyp, np.integer):
-        return np.rint(np.mean(array, axis=axis)).astype(array.dtype)
+        return np.rint(np.mean(array, axis=axis)).astype(dtyp)
     else:
         return np.mean(array, axis=axis)
