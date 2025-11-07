@@ -1043,16 +1043,16 @@ class CachedDaskArray:
                     )
                 )
             if force_compute or np.all([c.done() for c in self.core_cached_blocks]):
-                future = self.client.submit(
-                    np.mean, results, axis=0, dtype=self.array.dtype
-                )
+                future = self.client.submit(round_mean, results, axis=0)
                 if return_future:
                     return future
                 else:
                     return future.result()
             else:
                 return self.client.submit(
-                    np.mean, results, axis=0, dtype=self.array.dtype
+                    round_mean,
+                    results,
+                    axis=0,
                 )
 
         elif distributed_installed and self.client is not None:
@@ -1092,3 +1092,25 @@ def get_inds(arrs, indices, sum_data=True):
         )  # maintain dtype for plotting...
     else:
         return arrs[indices]
+
+
+def round_mean(array, axis=0):
+    """
+    Compute the mean of an array along a given axis and round the result
+    if it is of integer type.
+    Parameters
+    ----------
+    array : numpy array
+        Input array.
+    axis : int, optional
+        Axis along which to compute the mean. Default is 0.
+    Returns
+    -------
+    numpy array
+        Mean of the input array along the specified axis, rounded if the
+        input array is of integer type.
+    """
+    if np.issubdtype(array.dtype, np.integer):
+        return np.rint(np.mean(array, axis=axis)).astype(array.dtype)
+    else:
+        return np.mean(array, axis=axis)
