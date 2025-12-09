@@ -894,6 +894,7 @@ class CachedDaskArray:
         sum_data=True,
         data_on_workers=True,
         return_future=False,
+        **kwargs,
     ):
         """
         The first time that a dask result is called the chunk is loaded into memory
@@ -1040,11 +1041,12 @@ class CachedDaskArray:
                         self.core_cached_blocks[b_ind],
                         slices,
                         sum_data=sum_data,
+                        **kwargs,
                     )
                 )
             # Combine per-block (sum, count) with a weighted mean and round only at the end
             future = self.client.submit(
-                weighted_mean_round_from_sums, results, self.array.dtype
+                weighted_mean_round_from_sums, results, self.array.dtype, **kwargs
             )
             if return_future:
                 return future
