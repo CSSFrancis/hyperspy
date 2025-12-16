@@ -1044,12 +1044,8 @@ class CachedDaskArray:
                         **kwargs,
                     )
                 )
-            # Combine per-block (sum, count) with a weighted mean and round only at the end
-            if len(results) == 1 and results[0][1] == 1:
-                # shortcut for single block and no summation
-                future = results[0][0]
-            else:
-                future = self.client.submit(
+
+            future = self.client.submit(
                     weighted_mean_round_from_sums, results, self.array.dtype, **kwargs
                 )
             if return_future:
@@ -1133,6 +1129,9 @@ def weighted_mean_round_from_sums(pairs, target_dtype=None):
     Combine a list of (sum, count) pairs into a weighted mean.
     Round back to integer if target_dtype is integer.
     """
+    if len(pairs) == 1 and pairs[0][1] == 1:
+        return pairs[0][0]
+
     total_sum = None
     total_count = 0
     for s, c in pairs:
