@@ -1045,9 +1045,13 @@ class CachedDaskArray:
                     )
                 )
             # Combine per-block (sum, count) with a weighted mean and round only at the end
-            future = self.client.submit(
-                weighted_mean_round_from_sums, results, self.array.dtype, **kwargs
-            )
+            if len(results) == 1 and results[0][1] == 1:
+                # shortcut for single block and no summation
+                future = results[0][0]
+            else:
+                future = self.client.submit(
+                    weighted_mean_round_from_sums, results, self.array.dtype, **kwargs
+                )
             if return_future:
                 return future
             if force_compute or np.all([c.done() for c in self.core_cached_blocks]):
@@ -1089,7 +1093,11 @@ def get_inds(arrs, indices, sum_data=True):
     if sum_data:
         sub = arrs[indices]
         # Sum in float64 to avoid integer overflow; return count for weighting
-        return (np.sum(sub, axis=0, dtype=np.float64), sub.shape[0])
+        if sub.shape[0] == 1:
+            # shortcut for single element
+            return sub[0], 1
+        else:
+            return (np.sum(sub, axis=0, dtype=np.float64), sub.shape[0])
     else:
         return arrs[indices]
 
