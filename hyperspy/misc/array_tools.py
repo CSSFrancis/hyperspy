@@ -1045,7 +1045,7 @@ class CachedDaskArray:
                     )
                 )
             if len(core_block_ind) == 1 and ind_by_block[0].shape[0] ==1:
-                future = results[0] # ignore weighted mean for a single result
+                future = results # ignore weighted mean for a single result
             else:
                 future = self.client.submit(
                         weighted_mean_round_from_sums, results, self.array.dtype, **kwargs
