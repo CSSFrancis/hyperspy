@@ -1045,7 +1045,7 @@ class CachedDaskArray:
                     )
                 )
             if len(core_block_ind) == 1 and ind_by_block[0].shape[0] ==1:
-                future = results # ignore weighted mean for a single result
+                future = results[0] # ignore weighted mean for a single result
             else:
                 future = self.client.submit(
                         weighted_mean_round_from_sums, results, self.array.dtype, **kwargs
@@ -1093,7 +1093,7 @@ def get_inds(arrs, indices, sum_data=True):
         # Sum in float64 to avoid integer overflow; return count for weighting
         if sub.shape[0] == 1:
             # shortcut for single element
-            return sub[0], 1
+            return sub[0]
         else:
             return (np.sum(sub, axis=0, dtype=np.float64), sub.shape[0])
     else:
