@@ -1044,10 +1044,12 @@ class CachedDaskArray:
                         **kwargs,
                     )
                 )
-
-            future = self.client.submit(
-                    weighted_mean_round_from_sums, results, self.array.dtype, **kwargs
-                )
+            if len(core_block_ind) == 1 and ind_by_block[0].shape[0] ==1:
+                future = results[0] # ignore weighted mean for a single result
+            else:
+                future = self.client.submit(
+                        weighted_mean_round_from_sums, results, self.array.dtype, **kwargs
+                    )
             if return_future:
                 return future
             if force_compute or np.all([c.done() for c in self.core_cached_blocks]):
@@ -1087,7 +1089,7 @@ class CachedDaskArray:
 
 def get_inds(arrs, indices, sum_data=True):
     if sum_data:
-        sub = arrs[indices]
+        sub = arrs[indices] # if indices is list and arrs is memmap will load into memory...
         # Sum in float64 to avoid integer overflow; return count for weighting
         if sub.shape[0] == 1:
             # shortcut for single element
