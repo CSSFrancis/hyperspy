@@ -71,6 +71,10 @@ class Viewer2D(anywidget.AnyWidget):
     # Overlay widgets – JSON list of shape dicts synced to JS
     overlay_widgets = traitlets.Unicode("[]").tag(sync=True)
 
+    # Marker overlay – mirrors Circles(Markers): list of marker-set dicts
+    # Each dict: { offsets:[[x,y],...], sizes:[r,...], color, linewidth }
+    markers_json = traitlets.Unicode("[]").tag(sync=True)
+
     # ------------------------------------------------------------------ JS
     _esm = r"""
     function render({ model, el }) {
@@ -127,6 +131,13 @@ class Viewer2D(anywidget.AnyWidget):
       imageCol.style.position = 'relative';
       imageCol.appendChild(overlayCanvas);
       const ovCtx = overlayCanvas.getContext('2d');
+
+      // Markers canvas – sits above overlay canvas, also pointer-events:none
+      const markersCanvas = document.createElement('canvas');
+      markersCanvas.style.cssText =
+        'position:absolute;top:0;left:0;pointer-events:none;z-index:6;';
+      imageCol.appendChild(markersCanvas);
+      const mkCtx = markersCanvas.getContext('2d');
 
       // Scale bar
       const scaleBar = document.createElement('div');
@@ -196,6 +207,10 @@ class Viewer2D(anywidget.AnyWidget):
         overlayCanvas.width  = w * dpr;  overlayCanvas.height = h * dpr;
         overlayCanvas.style.width  = w + 'px';  overlayCanvas.style.height = h + 'px';
         ovCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        markersCanvas.width  = w * dpr;  markersCanvas.height = h * dpr;
+        markersCanvas.style.width  = w + 'px';  markersCanvas.style.height = h + 'px';
+        mkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         if (useScalebar) {
           xAxisCanvas.style.display = 'none';
@@ -351,6 +366,7 @@ class Viewer2D(anywidget.AnyWidget):
 
         if (model.get('use_scalebar')) drawScaleBar(); else drawAxes();
         drawOverlay();
+        drawMarkers();
       }
 
       // ── histogram ──────────────────────────────────────────────────────────
@@ -398,6 +414,155 @@ class Viewer2D(anywidget.AnyWidget):
         histCtx.fillStyle = '#666'; histCtx.font = '10px monospace'; histCtx.textAlign = 'left';
         histCtx.fillText(model.get('hist_max').toFixed(0), chartX + 2, 12);
         histCtx.fillText(model.get('hist_min').toFixed(0), chartX + 2, h - 3);
+      }
+
+      // ── marker overlay ─────────────────────────────────────────────────────
+      // markers_json is a JSON array of marker-set objects. Each has a 'type'
+      // field and type-specific data, mirroring the HyperSpy Markers API.
+      //
+      // circles:    { type:'circles',    offsets:[[x,y],...], sizes:[r,...],       color, linewidth }
+      // arrows:     { type:'arrows',     offsets:[[x,y],...], U:[...], V:[...],    color, linewidth }
+      // ellipses:   { type:'ellipses',   offsets:[[x,y],...], widths:[...], heights:[...], angles:[...], color, linewidth }
+      // lines:      { type:'lines',      segments:[[[x1,y1],[x2,y2]],...],         color, linewidth }
+      // rectangles: { type:'rectangles', offsets:[[x,y],...], widths:[...], heights:[...], angles:[...], color, linewidth }
+      // squares:    { type:'squares',    offsets:[[x,y],...], widths:[...],  angles:[...], color, linewidth }
+      // texts:      { type:'texts',      offsets:[[x,y],...], texts:[...],          color, fontsize }
+      //
+      // All spatial values are in image-pixel units.
+
+      function drawMarkers() {
+        const cw = parseInt(markersCanvas.style.width)  || model.get('viewer_width');
+        const ch = parseInt(markersCanvas.style.height) || model.get('viewer_height');
+        mkCtx.clearRect(0, 0, cw, ch);
+
+        let sets;
+        try { sets = JSON.parse(model.get('markers_json')); }
+        catch (_) { return; }
+        if (!Array.isArray(sets) || sets.length === 0) return;
+
+        const scale = _imgScale();
+
+        for (const ms of sets) {
+          const color     = ms.color     || '#ff0000';
+          const linewidth = ms.linewidth != null ? ms.linewidth : 1.5;
+          const type      = ms.type || 'circles';
+
+          mkCtx.save();
+          mkCtx.strokeStyle = color;
+          mkCtx.fillStyle   = color;
+          mkCtx.lineWidth   = linewidth;
+
+          if (type === 'circles') {
+            const offsets = ms.offsets || [];
+            const sizes   = ms.sizes   || [];
+            for (let i = 0; i < offsets.length; i++) {
+              const [cx, cy] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              const r = (sizes[i] != null ? sizes[i] : (sizes[0] != null ? sizes[0] : 5)) * scale;
+              mkCtx.beginPath();
+              mkCtx.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+              mkCtx.stroke();
+            }
+
+          } else if (type === 'arrows') {
+            const offsets = ms.offsets || [];
+            const Us = ms.U || [], Vs = ms.V || [];
+            const headLen = 8; // canvas px
+            for (let i = 0; i < offsets.length; i++) {
+              const [x1, y1] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              const u = (Us[i] != null ? Us[i] : 0) * scale;
+              const v = (Vs[i] != null ? Vs[i] : 0) * scale;
+              const x2 = x1 + u, y2 = y1 + v;
+              const angle = Math.atan2(y2 - y1, x2 - x1);
+              // shaft
+              mkCtx.beginPath();
+              mkCtx.moveTo(x1, y1);
+              mkCtx.lineTo(x2, y2);
+              mkCtx.stroke();
+              // arrowhead
+              mkCtx.beginPath();
+              mkCtx.moveTo(x2, y2);
+              mkCtx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6),
+                           y2 - headLen * Math.sin(angle - Math.PI / 6));
+              mkCtx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6),
+                           y2 - headLen * Math.sin(angle + Math.PI / 6));
+              mkCtx.closePath();
+              mkCtx.fill();
+            }
+
+          } else if (type === 'ellipses') {
+            const offsets  = ms.offsets  || [];
+            const widths   = ms.widths   || [];
+            const heights  = ms.heights  || [];
+            const angles   = ms.angles   || [];
+            for (let i = 0; i < offsets.length; i++) {
+              const [cx, cy] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              const rw  = (widths[i]  != null ? widths[i]  : (widths[0]  != null ? widths[0]  : 10)) * scale / 2;
+              const rh  = (heights[i] != null ? heights[i] : (heights[0] != null ? heights[0] : 10)) * scale / 2;
+              const ang = ((angles[i] != null ? angles[i]  : (angles[0]  != null ? angles[0]  : 0)) * Math.PI) / 180;
+              mkCtx.beginPath();
+              mkCtx.ellipse(cx, cy, Math.max(1, rw), Math.max(1, rh), ang, 0, Math.PI * 2);
+              mkCtx.stroke();
+            }
+
+          } else if (type === 'lines') {
+            const segments = ms.segments || [];
+            for (const seg of segments) {
+              const [x1, y1] = _imgToCanvas(seg[0][0], seg[0][1]);
+              const [x2, y2] = _imgToCanvas(seg[1][0], seg[1][1]);
+              mkCtx.beginPath();
+              mkCtx.moveTo(x1, y1);
+              mkCtx.lineTo(x2, y2);
+              mkCtx.stroke();
+            }
+
+          } else if (type === 'rectangles') {
+            const offsets  = ms.offsets  || [];
+            const widths   = ms.widths   || [];
+            const heights  = ms.heights  || [];
+            const angles   = ms.angles   || [];
+            for (let i = 0; i < offsets.length; i++) {
+              const [cx, cy] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              const rw  = (widths[i]  != null ? widths[i]  : (widths[0]  != null ? widths[0]  : 20)) * scale;
+              const rh  = (heights[i] != null ? heights[i] : (heights[0] != null ? heights[0] : 20)) * scale;
+              const ang = ((angles[i] != null ? angles[i]  : (angles[0]  != null ? angles[0]  : 0)) * Math.PI) / 180;
+              mkCtx.save();
+              mkCtx.translate(cx, cy);
+              mkCtx.rotate(ang);
+              mkCtx.strokeRect(-rw / 2, -rh / 2, rw, rh);
+              mkCtx.restore();
+            }
+
+          } else if (type === 'squares') {
+            const offsets = ms.offsets || [];
+            const widths  = ms.widths  || [];
+            const angles  = ms.angles  || [];
+            for (let i = 0; i < offsets.length; i++) {
+              const [cx, cy] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              const side = (widths[i] != null ? widths[i] : (widths[0] != null ? widths[0] : 20)) * scale;
+              const ang  = ((angles[i] != null ? angles[i] : (angles[0] != null ? angles[0] : 0)) * Math.PI) / 180;
+              mkCtx.save();
+              mkCtx.translate(cx, cy);
+              mkCtx.rotate(ang);
+              mkCtx.strokeRect(-side / 2, -side / 2, side, side);
+              mkCtx.restore();
+            }
+
+          } else if (type === 'texts') {
+            const offsets  = ms.offsets || [];
+            const texts    = ms.texts   || [];
+            const fontsize = ms.fontsize != null ? ms.fontsize : 12;
+            mkCtx.font      = `${fontsize}px sans-serif`;
+            mkCtx.textAlign = 'left';
+            mkCtx.textBaseline = 'top';
+            for (let i = 0; i < offsets.length; i++) {
+              const [cx, cy] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              const label = texts[i] != null ? String(texts[i]) : '';
+              mkCtx.fillText(label, cx, cy);
+            }
+          }
+
+          mkCtx.restore();
+        }
       }
 
       // ── overlay widgets ────────────────────────────────────────────────────
@@ -646,6 +811,9 @@ class Viewer2D(anywidget.AnyWidget):
           overlayCanvas.style.width  = nw + 'px'; overlayCanvas.style.height = nh + 'px';
           overlayCanvas.width = nw * dpr; overlayCanvas.height = nh * dpr;
           ovCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          markersCanvas.style.width  = nw + 'px'; markersCanvas.style.height = nh + 'px';
+          markersCanvas.width = nw * dpr; markersCanvas.height = nh * dpr;
+          mkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
           histCanvas.style.height = nh + 'px'; histCanvas.height = nh * dpr;
           histCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
           if (!model.get('use_scalebar')) {
@@ -743,11 +911,13 @@ class Viewer2D(anywidget.AnyWidget):
       model.on('change:scale_x',  drawScaleBar);
       model.on('change:units',    () => { drawScaleBar(); if (!model.get('use_scalebar')) drawAxes(); });
       model.on('change:overlay_widgets', drawOverlay);
+      model.on('change:markers_json',    drawMarkers);
 
       // ── initial render ─────────────────────────────────────────────────────
       drawImage();
       drawHistogram();
       drawOverlay();
+      drawMarkers();
     }
 
     export default { render };
@@ -976,3 +1146,288 @@ class Viewer2D(anywidget.AnyWidget):
             if w["id"] == wid:
                 return dict(w)
         raise KeyError(f"No overlay widget with id {wid!r}")
+
+    # ================================================================== markers
+    # Low-level helper
+    # -----------------------------------------------------------------
+    def _push_markers(self, ms: dict, replace: bool) -> None:
+        """Append or replace the markers_json list."""
+        if replace:
+            self.markers_json = json.dumps([ms])
+        else:
+            existing = json.loads(self.markers_json)
+            existing.append(ms)
+            self.markers_json = json.dumps(existing)
+
+    @staticmethod
+    def _broadcast_1d(arr, n: int, name: str) -> list:
+        arr = np.asarray(arr, dtype=float)
+        if arr.ndim == 0:
+            return np.full(n, float(arr)).tolist()
+        if arr.ndim != 1 or len(arr) != n:
+            raise ValueError(f"'{name}' must be a scalar or 1-D array of length {n}")
+        return arr.tolist()
+
+    @staticmethod
+    def _check_offsets(offsets) -> np.ndarray:
+        offsets = np.asarray(offsets, dtype=float)
+        if offsets.ndim == 1 and offsets.shape[0] == 2:
+            offsets = offsets[np.newaxis, :]
+        if offsets.ndim != 2 or offsets.shape[1] != 2:
+            raise ValueError("offsets must be shape (N, 2)")
+        return offsets
+
+    # -----------------------------------------------------------------
+    def set_circles(self, offsets, sizes, color="#ff0000", linewidth=1.5) -> None:
+        """Set circle markers (replaces all existing markers).
+
+        Mirrors :class:`~hyperspy.drawing._markers.circles.Circles`.
+
+        Parameters
+        ----------
+        offsets : array-like (N, 2)
+            ``[[x, y], ...]`` centre positions in image-pixel space.
+        sizes : array-like or scalar
+            Radius of each circle in image-pixel units.
+        color : str, optional  CSS colour (default ``'#ff0000'``).
+        linewidth : float, optional  Stroke width in canvas pixels.
+        """
+        offsets = self._check_offsets(offsets)
+        n = len(offsets)
+        ms = {"type": "circles", "offsets": offsets.tolist(),
+              "sizes": self._broadcast_1d(sizes, n, "sizes"),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=True)
+
+    def add_circles(self, offsets, sizes, color="#ff0000", linewidth=1.5) -> None:
+        """Add circle markers on top of existing markers.  Same parameters as
+        :meth:`set_circles`."""
+        offsets = self._check_offsets(offsets)
+        n = len(offsets)
+        ms = {"type": "circles", "offsets": offsets.tolist(),
+              "sizes": self._broadcast_1d(sizes, n, "sizes"),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=False)
+
+    # -----------------------------------------------------------------
+    def set_arrows(self, offsets, U, V, color="#ff0000", linewidth=1.5) -> None:
+        """Set arrow markers (replaces all existing markers).
+
+        Mirrors :class:`~hyperspy.drawing._markers.arrows.Arrows`.
+
+        Parameters
+        ----------
+        offsets : array-like (N, 2)   Arrow tail positions ``[[x, y], ...]``.
+        U : array-like or scalar      Horizontal component (image-pixel units).
+        V : array-like or scalar      Vertical component (image-pixel units).
+        color : str, optional
+        linewidth : float, optional
+        """
+        offsets = self._check_offsets(offsets)
+        n = len(offsets)
+        ms = {"type": "arrows", "offsets": offsets.tolist(),
+              "U": self._broadcast_1d(U, n, "U"),
+              "V": self._broadcast_1d(V, n, "V"),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=True)
+
+    def add_arrows(self, offsets, U, V, color="#ff0000", linewidth=1.5) -> None:
+        """Add arrow markers on top of existing markers.  Same parameters as
+        :meth:`set_arrows`."""
+        offsets = self._check_offsets(offsets)
+        n = len(offsets)
+        ms = {"type": "arrows", "offsets": offsets.tolist(),
+              "U": self._broadcast_1d(U, n, "U"),
+              "V": self._broadcast_1d(V, n, "V"),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=False)
+
+    # -----------------------------------------------------------------
+    def set_ellipses(self, offsets, widths, heights, angles=0,
+                     color="#ff0000", linewidth=1.5) -> None:
+        """Set ellipse markers (replaces all existing markers).
+
+        Mirrors :class:`~hyperspy.drawing._markers.ellipses.Ellipses`.
+
+        Parameters
+        ----------
+        offsets : array-like (N, 2)   Centre positions ``[[x, y], ...]``.
+        widths : array-like or scalar  Full width in image-pixel units.
+        heights : array-like or scalar Full height in image-pixel units.
+        angles : array-like or scalar  Rotation angle in degrees (default 0).
+        color : str, optional
+        linewidth : float, optional
+        """
+        offsets = self._check_offsets(offsets)
+        n = len(offsets)
+        ms = {"type": "ellipses", "offsets": offsets.tolist(),
+              "widths":  self._broadcast_1d(widths,  n, "widths"),
+              "heights": self._broadcast_1d(heights, n, "heights"),
+              "angles":  self._broadcast_1d(angles,  n, "angles"),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=True)
+
+    def add_ellipses(self, offsets, widths, heights, angles=0,
+                     color="#ff0000", linewidth=1.5) -> None:
+        """Add ellipse markers on top of existing markers.  Same parameters as
+        :meth:`set_ellipses`."""
+        offsets = self._check_offsets(offsets)
+        n = len(offsets)
+        ms = {"type": "ellipses", "offsets": offsets.tolist(),
+              "widths":  self._broadcast_1d(widths,  n, "widths"),
+              "heights": self._broadcast_1d(heights, n, "heights"),
+              "angles":  self._broadcast_1d(angles,  n, "angles"),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=False)
+
+    # -----------------------------------------------------------------
+    def set_lines(self, segments, color="#ff0000", linewidth=1.5) -> None:
+        """Set line-segment markers (replaces all existing markers).
+
+        Mirrors :class:`~hyperspy.drawing._markers.lines.Lines`.
+
+        Parameters
+        ----------
+        segments : array-like (N, 2, 2)
+            ``[[[x1,y1],[x2,y2]], ...]`` in image-pixel space.
+        color : str, optional
+        linewidth : float, optional
+        """
+        segments = np.asarray(segments, dtype=float)
+        if segments.ndim == 2 and segments.shape == (2, 2):
+            segments = segments[np.newaxis]           # single segment
+        if segments.ndim != 3 or segments.shape[1:] != (2, 2):
+            raise ValueError("segments must be shape (N, 2, 2)")
+        ms = {"type": "lines", "segments": segments.tolist(),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=True)
+
+    def add_lines(self, segments, color="#ff0000", linewidth=1.5) -> None:
+        """Add line-segment markers on top of existing markers.  Same
+        parameters as :meth:`set_lines`."""
+        segments = np.asarray(segments, dtype=float)
+        if segments.ndim == 2 and segments.shape == (2, 2):
+            segments = segments[np.newaxis]
+        if segments.ndim != 3 or segments.shape[1:] != (2, 2):
+            raise ValueError("segments must be shape (N, 2, 2)")
+        ms = {"type": "lines", "segments": segments.tolist(),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=False)
+
+    # -----------------------------------------------------------------
+    def set_rectangles(self, offsets, widths, heights, angles=0,
+                       color="#ff0000", linewidth=1.5) -> None:
+        """Set rectangle markers (replaces all existing markers).
+
+        Parameters
+        ----------
+        offsets : array-like (N, 2)    Centre positions ``[[x, y], ...]``.
+        widths : array-like or scalar  Width in image-pixel units.
+        heights : array-like or scalar Height in image-pixel units.
+        angles : array-like or scalar  Rotation in degrees (default 0).
+        color : str, optional
+        linewidth : float, optional
+        """
+        offsets = self._check_offsets(offsets)
+        n = len(offsets)
+        ms = {"type": "rectangles", "offsets": offsets.tolist(),
+              "widths":  self._broadcast_1d(widths,  n, "widths"),
+              "heights": self._broadcast_1d(heights, n, "heights"),
+              "angles":  self._broadcast_1d(angles,  n, "angles"),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=True)
+
+    def add_rectangles(self, offsets, widths, heights, angles=0,
+                       color="#ff0000", linewidth=1.5) -> None:
+        """Add rectangle markers on top of existing markers.  Same parameters
+        as :meth:`set_rectangles`."""
+        offsets = self._check_offsets(offsets)
+        n = len(offsets)
+        ms = {"type": "rectangles", "offsets": offsets.tolist(),
+              "widths":  self._broadcast_1d(widths,  n, "widths"),
+              "heights": self._broadcast_1d(heights, n, "heights"),
+              "angles":  self._broadcast_1d(angles,  n, "angles"),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=False)
+
+    # -----------------------------------------------------------------
+    def set_squares(self, offsets, widths, angles=0,
+                    color="#ff0000", linewidth=1.5) -> None:
+        """Set square markers (replaces all existing markers).
+
+        Mirrors :class:`~hyperspy.drawing._markers.squares.Squares`.
+
+        Parameters
+        ----------
+        offsets : array-like (N, 2)    Centre positions ``[[x, y], ...]``.
+        widths : array-like or scalar  Side length in image-pixel units.
+        angles : array-like or scalar  Rotation in degrees (default 0).
+        color : str, optional
+        linewidth : float, optional
+        """
+        offsets = self._check_offsets(offsets)
+        n = len(offsets)
+        ms = {"type": "squares", "offsets": offsets.tolist(),
+              "widths": self._broadcast_1d(widths, n, "widths"),
+              "angles": self._broadcast_1d(angles, n, "angles"),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=True)
+
+    def add_squares(self, offsets, widths, angles=0,
+                    color="#ff0000", linewidth=1.5) -> None:
+        """Add square markers on top of existing markers.  Same parameters as
+        :meth:`set_squares`."""
+        offsets = self._check_offsets(offsets)
+        n = len(offsets)
+        ms = {"type": "squares", "offsets": offsets.tolist(),
+              "widths": self._broadcast_1d(widths, n, "widths"),
+              "angles": self._broadcast_1d(angles, n, "angles"),
+              "color": color, "linewidth": linewidth}
+        self._push_markers(ms, replace=False)
+
+    # -----------------------------------------------------------------
+    def set_texts(self, offsets, texts, color="#ff0000", fontsize=12) -> None:
+        """Set text markers (replaces all existing markers).
+
+        Mirrors :class:`~hyperspy.drawing._markers.texts.Texts`.
+
+        Parameters
+        ----------
+        offsets : array-like (N, 2)   Anchor positions ``[[x, y], ...]``.
+        texts : list of str           One label per position.
+        color : str, optional
+        fontsize : int, optional      Font size in canvas pixels (default 12).
+        """
+        offsets = self._check_offsets(offsets)
+        texts = list(texts)
+        if len(texts) != len(offsets):
+            raise ValueError("len(texts) must equal len(offsets)")
+        ms = {"type": "texts", "offsets": offsets.tolist(),
+              "texts": texts, "color": color, "fontsize": fontsize}
+        self._push_markers(ms, replace=True)
+
+    def add_texts(self, offsets, texts, color="#ff0000", fontsize=12) -> None:
+        """Add text markers on top of existing markers.  Same parameters as
+        :meth:`set_texts`."""
+        offsets = self._check_offsets(offsets)
+        texts = list(texts)
+        if len(texts) != len(offsets):
+            raise ValueError("len(texts) must equal len(offsets)")
+        ms = {"type": "texts", "offsets": offsets.tolist(),
+              "texts": texts, "color": color, "fontsize": fontsize}
+        self._push_markers(ms, replace=False)
+
+    # -----------------------------------------------------------------
+    # Legacy aliases kept for back-compat with earlier set_markers call
+    def set_markers(self, offsets, sizes, color="#ff0000", linewidth=1.5) -> None:
+        """Alias for :meth:`set_circles` (kept for backwards compatibility)."""
+        self.set_circles(offsets, sizes, color=color, linewidth=linewidth)
+
+    def add_markers(self, offsets, sizes, color="#ff0000", linewidth=1.5) -> None:
+        """Alias for :meth:`add_circles` (kept for backwards compatibility)."""
+        self.add_circles(offsets, sizes, color=color, linewidth=linewidth)
+
+    def clear_markers(self) -> None:
+        """Remove all marker overlays."""
+        self.markers_json = "[]"
+
