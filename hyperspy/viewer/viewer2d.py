@@ -39,34 +39,37 @@ class Viewer2D(anywidget.AnyWidget):
     """2-D image viewer that works directly with numpy arrays."""
 
     # ------------------------------------------------------------------ traits
-    image_bytes   = traitlets.Bytes(b"").tag(sync=True)
-    image_width   = traitlets.Int(256).tag(sync=True)
-    image_height  = traitlets.Int(256).tag(sync=True)
+    image_bytes = traitlets.Bytes(b"").tag(sync=True)
+    image_width = traitlets.Int(256).tag(sync=True)
+    image_height = traitlets.Int(256).tag(sync=True)
 
-    viewer_width  = traitlets.Int(256).tag(sync=True)
+    viewer_width = traitlets.Int(256).tag(sync=True)
     viewer_height = traitlets.Int(256).tag(sync=True)
 
-    x_axis_json   = traitlets.Unicode("[]").tag(sync=True)
-    y_axis_json   = traitlets.Unicode("[]").tag(sync=True)
-    units         = traitlets.Unicode("px").tag(sync=True)
+    x_axis_json = traitlets.Unicode("[]").tag(sync=True)
+    y_axis_json = traitlets.Unicode("[]").tag(sync=True)
+    units = traitlets.Unicode("px").tag(sync=True)
 
-    use_scalebar  = traitlets.Bool(True).tag(sync=True)
-    scale_x       = traitlets.Float(1.0).tag(sync=True)
-    scale_y       = traitlets.Float(1.0).tag(sync=True)
+    use_scalebar = traitlets.Bool(True).tag(sync=True)
+    scale_x = traitlets.Float(1.0).tag(sync=True)
+    scale_y = traitlets.Float(1.0).tag(sync=True)
 
-    histogram_data    = traitlets.Unicode('{"bins":[],"counts":[]}').tag(sync=True)
-    hist_min          = traitlets.Float(0.0).tag(sync=True)
-    hist_max          = traitlets.Float(255.0).tag(sync=True)
+    histogram_data = traitlets.Unicode('{"bins":[],"counts":[]}').tag(sync=True)
+    hist_min = traitlets.Float(0.0).tag(sync=True)
+    hist_max = traitlets.Float(255.0).tag(sync=True)
     histogram_visible = traitlets.Bool(True).tag(sync=True)
-    log_scale         = traitlets.Bool(False).tag(sync=True)
-    show_colorbar     = traitlets.Bool(True).tag(sync=True)
-    colorbar_width    = traitlets.Int(20).tag(sync=True)
-    histogram_width   = traitlets.Int(120).tag(sync=True)
-    gap               = traitlets.Int(10).tag(sync=True)
+    log_scale = traitlets.Bool(False).tag(sync=True)
+    show_colorbar = traitlets.Bool(True).tag(sync=True)
+    colorbar_width = traitlets.Int(20).tag(sync=True)
+    histogram_width = traitlets.Int(120).tag(sync=True)
+    gap = traitlets.Int(10).tag(sync=True)
 
-    zoom     = traitlets.Float(1.0).tag(sync=True)
+    zoom = traitlets.Float(1.0).tag(sync=True)
     center_x = traitlets.Float(0.5).tag(sync=True)
     center_y = traitlets.Float(0.5).tag(sync=True)
+
+    # Overlay widgets – JSON list of shape dicts synced to JS
+    overlay_widgets = traitlets.Unicode("[]").tag(sync=True)
 
     # ------------------------------------------------------------------ JS
     _esm = r"""
@@ -116,6 +119,14 @@ class Viewer2D(anywidget.AnyWidget):
       imageCol.appendChild(imageCanvas);
       imageCol.appendChild(xAxisCanvas);
       canvasWrapper.appendChild(imageRow);
+
+      // Overlay canvas – absolutely positioned on top of imageCanvas
+      const overlayCanvas = document.createElement('canvas');
+      overlayCanvas.style.cssText =
+        'position:absolute;top:0;left:0;pointer-events:none;z-index:5;';
+      imageCol.style.position = 'relative';
+      imageCol.appendChild(overlayCanvas);
+      const ovCtx = overlayCanvas.getContext('2d');
 
       // Scale bar
       const scaleBar = document.createElement('div');
@@ -181,6 +192,10 @@ class Viewer2D(anywidget.AnyWidget):
         imageCanvas.style.width  = w + 'px';  imageCanvas.style.height = h + 'px';
         imgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
         imgCtx.imageSmoothingEnabled = false;
+
+        overlayCanvas.width  = w * dpr;  overlayCanvas.height = h * dpr;
+        overlayCanvas.style.width  = w + 'px';  overlayCanvas.style.height = h + 'px';
+        ovCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         if (useScalebar) {
           xAxisCanvas.style.display = 'none';
@@ -335,6 +350,7 @@ class Viewer2D(anywidget.AnyWidget):
         }
 
         if (model.get('use_scalebar')) drawScaleBar(); else drawAxes();
+        drawOverlay();
       }
 
       // ── histogram ──────────────────────────────────────────────────────────
@@ -384,6 +400,221 @@ class Viewer2D(anywidget.AnyWidget):
         histCtx.fillText(model.get('hist_min').toFixed(0), chartX + 2, h - 3);
       }
 
+      // ── overlay widgets ────────────────────────────────────────────────────
+      // Shapes: { id, type:'circle',    cx, cy, r,  color }
+      //         { id, type:'rectangle', x,  y,  w,  h, color }
+      // All coordinates are in image-pixel space.
+      const HANDLE_R    = 7;   // hit-test radius (canvas px)
+      const HANDLE_DRAW = 5;   // visual radius
+
+      function _imgToCanvas(ix, iy) {
+        const zoom = model.get('zoom'), cx = model.get('center_x'), cy = model.get('center_y');
+        const cw = parseInt(overlayCanvas.style.width)  || model.get('viewer_width');
+        const ch = parseInt(overlayCanvas.style.height) || model.get('viewer_height');
+        const iw = model.get('image_width'), ih = model.get('image_height');
+        if (zoom >= 1.0) {
+          const visW = iw / zoom, visH = ih / zoom;
+          const srcX = Math.max(0, Math.min(iw - visW, cx * iw - visW / 2));
+          const srcY = Math.max(0, Math.min(ih - visH, cy * ih - visH / 2));
+          return [(ix - srcX) / visW * cw, (iy - srcY) / visH * ch];
+        } else {
+          const dstW = cw * zoom, dstH = ch * zoom;
+          return [(cw - dstW) / 2 + (ix / iw) * dstW,
+                  (ch - dstH) / 2 + (iy / ih) * dstH];
+        }
+      }
+
+      function _canvasToImg(px, py) {
+        const zoom = model.get('zoom'), cx = model.get('center_x'), cy = model.get('center_y');
+        const cw = parseInt(overlayCanvas.style.width)  || model.get('viewer_width');
+        const ch = parseInt(overlayCanvas.style.height) || model.get('viewer_height');
+        const iw = model.get('image_width'), ih = model.get('image_height');
+        if (zoom >= 1.0) {
+          const visW = iw / zoom, visH = ih / zoom;
+          const srcX = Math.max(0, Math.min(iw - visW, cx * iw - visW / 2));
+          const srcY = Math.max(0, Math.min(ih - visH, cy * ih - visH / 2));
+          return [srcX + (px / cw) * visW, srcY + (py / ch) * visH];
+        } else {
+          const dstW = cw * zoom, dstH = ch * zoom;
+          return [((px - (cw - dstW) / 2) / dstW) * iw,
+                  ((py - (ch - dstH) / 2) / dstH) * ih];
+        }
+      }
+
+      function _imgScale() {
+        const zoom = model.get('zoom');
+        const cw   = parseInt(overlayCanvas.style.width)  || model.get('viewer_width');
+        const iw   = model.get('image_width');
+        return zoom >= 1.0 ? cw / (iw / zoom) : cw * zoom / iw;
+      }
+
+      function _drawHandle(x, y, color) {
+        ovCtx.save();
+        ovCtx.fillStyle   = '#ffffff';
+        ovCtx.strokeStyle = color || '#00e5ff';
+        ovCtx.lineWidth   = 1.5;
+        ovCtx.beginPath();
+        ovCtx.arc(x, y, HANDLE_DRAW, 0, Math.PI * 2);
+        ovCtx.fill();
+        ovCtx.stroke();
+        ovCtx.restore();
+      }
+
+      function drawOverlay() {
+        const cw = parseInt(overlayCanvas.style.width)  || model.get('viewer_width');
+        const ch = parseInt(overlayCanvas.style.height) || model.get('viewer_height');
+        ovCtx.clearRect(0, 0, cw, ch);
+        const widgets = JSON.parse(model.get('overlay_widgets'));
+        const scale   = _imgScale();
+        for (const w of widgets) {
+          ovCtx.save();
+          ovCtx.strokeStyle = w.color || '#00e5ff';
+          ovCtx.lineWidth   = 2;
+          if (w.type === 'circle') {
+            const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
+            const cr = w.r * scale;
+            ovCtx.beginPath();
+            ovCtx.arc(ccx, ccy, cr, 0, Math.PI * 2);
+            ovCtx.stroke();
+            _drawHandle(ccx + cr, ccy, w.color);
+          } else if (w.type === 'rectangle') {
+            const [rx, ry] = _imgToCanvas(w.x, w.y);
+            const rw = w.w * scale, rh = w.h * scale;
+            ovCtx.strokeRect(rx, ry, rw, rh);
+            _drawHandle(rx,      ry,      w.color);
+            _drawHandle(rx + rw, ry,      w.color);
+            _drawHandle(rx,      ry + rh, w.color);
+            _drawHandle(rx + rw, ry + rh, w.color);
+          }
+          ovCtx.restore();
+        }
+      }
+
+      // ── overlay hit-test & drag ────────────────────────────────────────────
+      let ovDrag = null;
+
+      function _handles(w) {
+        const scale = _imgScale();
+        if (w.type === 'circle') {
+          const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
+          return [{ x: ccx + w.r * scale, y: ccy }];
+        }
+        const [rx, ry] = _imgToCanvas(w.x, w.y);
+        const rw = w.w * scale, rh = w.h * scale;
+        return [{ x: rx, y: ry }, { x: rx + rw, y: ry },
+                { x: rx, y: ry + rh }, { x: rx + rw, y: ry + rh }];
+      }
+
+      function _hitTest(ex, ey) {
+        const widgets = JSON.parse(model.get('overlay_widgets'));
+        const rect    = imageCanvas.getBoundingClientRect();
+        const mx = ex - rect.left, my = ey - rect.top;
+        // Handles first
+        for (let i = widgets.length - 1; i >= 0; i--) {
+          const hs = _handles(widgets[i]);
+          for (let hi = 0; hi < hs.length; hi++) {
+            const dx = mx - hs[hi].x, dy = my - hs[hi].y;
+            if (Math.sqrt(dx * dx + dy * dy) <= HANDLE_R)
+              return { idx: i, mode: 'resize', hi };
+          }
+        }
+        // Body
+        const scale = _imgScale();
+        for (let i = widgets.length - 1; i >= 0; i--) {
+          const w = widgets[i];
+          if (w.type === 'circle') {
+            const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
+            const dx = mx - ccx, dy = my - ccy;
+            if (Math.sqrt(dx * dx + dy * dy) <= w.r * scale + 4)
+              return { idx: i, mode: 'move', hi: -1 };
+          } else {
+            const [rx, ry] = _imgToCanvas(w.x, w.y);
+            const rw = w.w * scale, rh = w.h * scale;
+            if (mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh)
+              return { idx: i, mode: 'move', hi: -1 };
+          }
+        }
+        return null;
+      }
+
+      // mousedown – check widgets before pan
+      imageCanvas.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        imageCanvas.focus();
+        const hit = _hitTest(e.clientX, e.clientY);
+        if (hit) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          const rect = imageCanvas.getBoundingClientRect();
+          const [ix, iy] = _canvasToImg(e.clientX - rect.left, e.clientY - rect.top);
+          const widgets = JSON.parse(model.get('overlay_widgets'));
+          ovDrag = { ...hit, startIX: ix, startIY: iy,
+                     snap: JSON.parse(JSON.stringify(widgets[hit.idx])) };
+          imageCanvas.style.cursor = hit.mode === 'resize' ? 'nwse-resize' : 'move';
+          return;
+        }
+        // fall through to pan
+        isPanning = true;
+        panStartX = e.clientX; panStartY = e.clientY;
+        panStartCenterX = model.get('center_x');
+        panStartCenterY = model.get('center_y');
+        imageCanvas.style.cursor = 'grabbing';
+        e.preventDefault();
+      }, true);   // capture so we beat the pan listener
+
+      document.addEventListener('mousemove', (e) => {
+        if (!ovDrag) return;
+        const rect = imageCanvas.getBoundingClientRect();
+        const [ix, iy] = _canvasToImg(e.clientX - rect.left, e.clientY - rect.top);
+        const dx = ix - ovDrag.startIX, dy = iy - ovDrag.startIY;
+        const widgets = JSON.parse(model.get('overlay_widgets'));
+        const s = ovDrag.snap;
+
+        if (ovDrag.mode === 'move') {
+          if (s.type === 'circle') {
+            widgets[ovDrag.idx].cx = s.cx + dx;
+            widgets[ovDrag.idx].cy = s.cy + dy;
+          } else {
+            widgets[ovDrag.idx].x = s.x + dx;
+            widgets[ovDrag.idx].y = s.y + dy;
+          }
+        } else {
+          if (s.type === 'circle') {
+            widgets[ovDrag.idx].r = Math.max(2,
+              Math.sqrt((ix - s.cx) ** 2 + (iy - s.cy) ** 2));
+          } else {
+            let nx = s.x, ny = s.y, nw = s.w, nh = s.h;
+            if      (ovDrag.hi === 0) { nx = s.x+dx; ny = s.y+dy; nw = s.w-dx; nh = s.h-dy; }
+            else if (ovDrag.hi === 1) {               ny = s.y+dy; nw = s.w+dx; nh = s.h-dy; }
+            else if (ovDrag.hi === 2) { nx = s.x+dx;               nw = s.w-dx; nh = s.h+dy; }
+            else                      {                              nw = s.w+dx; nh = s.h+dy; }
+            widgets[ovDrag.idx].x = nx; widgets[ovDrag.idx].y = ny;
+            widgets[ovDrag.idx].w = Math.max(4, nw);
+            widgets[ovDrag.idx].h = Math.max(4, nh);
+          }
+        }
+        model.set('overlay_widgets', JSON.stringify(widgets));
+        model.save_changes();
+        drawOverlay();
+        e.preventDefault();
+      }, true);
+
+      document.addEventListener('mouseup', (e) => {
+        if (!ovDrag) return;
+        ovDrag = null;
+        imageCanvas.style.cursor = 'default';
+        e.preventDefault();
+      }, true);
+
+      // hover cursor
+      imageCanvas.addEventListener('mousemove', (e) => {
+        if (ovDrag || isPanning || isResizing) return;
+        const hit = _hitTest(e.clientX, e.clientY);
+        imageCanvas.style.cursor = hit
+          ? (hit.mode === 'resize' ? 'nwse-resize' : 'move')
+          : 'default';
+      });
+
       // ── resize ─────────────────────────────────────────────────────────────
       resizeHandle.addEventListener('mousedown', (e) => {
         isResizing = true;
@@ -412,6 +643,9 @@ class Viewer2D(anywidget.AnyWidget):
           imageCanvas.width = nw * dpr; imageCanvas.height = nh * dpr;
           imgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
           imgCtx.imageSmoothingEnabled = false;
+          overlayCanvas.style.width  = nw + 'px'; overlayCanvas.style.height = nh + 'px';
+          overlayCanvas.width = nw * dpr; overlayCanvas.height = nh * dpr;
+          ovCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
           histCanvas.style.height = nh + 'px'; histCanvas.height = nh * dpr;
           histCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
           if (!model.get('use_scalebar')) {
@@ -452,17 +686,6 @@ class Viewer2D(anywidget.AnyWidget):
         }
       });
 
-      // ── pan ─────────────────────────────────────────────────────────────────
-      imageCanvas.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
-        isPanning = true;
-        panStartX = e.clientX; panStartY = e.clientY;
-        panStartCenterX = model.get('center_x');
-        panStartCenterY = model.get('center_y');
-        imageCanvas.style.cursor = 'grabbing';
-        imageCanvas.focus();
-        e.preventDefault();
-      });
 
       imageCanvas.addEventListener('mouseenter', () => imageCanvas.focus());
 
@@ -519,10 +742,12 @@ class Viewer2D(anywidget.AnyWidget):
       model.on('change:center_y', drawImage);
       model.on('change:scale_x',  drawScaleBar);
       model.on('change:units',    () => { drawScaleBar(); if (!model.get('use_scalebar')) drawAxes(); });
+      model.on('change:overlay_widgets', drawOverlay);
 
       // ── initial render ─────────────────────────────────────────────────────
       drawImage();
       drawHistogram();
+      drawOverlay();
     }
 
     export default { render };
@@ -573,10 +798,12 @@ class Viewer2D(anywidget.AnyWidget):
 
         counts, edges = np.histogram(data.flatten(), bins=256)
         bin_centers = (edges[:-1] + edges[1:]) / 2
-        histogram_json = json.dumps({
-            "bins":   bin_centers.tolist(),
-            "counts": counts.tolist(),
-        })
+        histogram_json = json.dumps(
+            {
+                "bins": bin_centers.tolist(),
+                "counts": counts.tolist(),
+            }
+        )
 
         aspect = w / h if h > 0 else 1.0
         if aspect >= 1.0:
@@ -585,25 +812,26 @@ class Viewer2D(anywidget.AnyWidget):
             vh, vw = 256, max(64, int(256 * aspect))
 
         with self.hold_trait_notifications():
-            self.image_bytes    = img_u8.tobytes()
-            self.image_width    = w
-            self.image_height   = h
-            self.viewer_width   = vw
-            self.viewer_height  = vh
-            self.units          = units
-            self.use_scalebar   = equal
-            self.scale_x        = float(abs(dx))
-            self.scale_y        = float(abs(dx))
-            self.x_axis_json    = json.dumps(x_axis.tolist())
-            self.y_axis_json    = json.dumps(y_axis.tolist())
+            self.image_bytes = img_u8.tobytes()
+            self.image_width = w
+            self.image_height = h
+            self.viewer_width = vw
+            self.viewer_height = vh
+            self.units = units
+            self.use_scalebar = equal
+            self.scale_x = float(abs(dx))
+            self.scale_y = float(abs(dx))
+            self.x_axis_json = json.dumps(x_axis.tolist())
+            self.y_axis_json = json.dumps(y_axis.tolist())
             self.histogram_data = histogram_json
-            self.hist_min       = float(vmin)
-            self.hist_max       = float(vmax)
+            self.hist_min = float(vmin)
+            self.hist_max = float(vmax)
 
     # ------------------------------------------------------------------
     def _to_png_bytes(self) -> bytes:
         """Render current image as PNG (PyCharm static fallback)."""
         from PIL import Image as _PILImage
+
         arr = np.frombuffer(self.image_bytes, dtype=np.uint8).reshape(
             self.image_height, self.image_width
         )
@@ -624,8 +852,9 @@ class Viewer2D(anywidget.AnyWidget):
         return bundle
 
     # ------------------------------------------------------------------
-    def update(self, data: np.ndarray, x_axis=None, y_axis=None,
-               units: str | None = None):
+    def update(
+        self, data: np.ndarray, x_axis=None, y_axis=None, units: str | None = None
+    ):
         """Update the viewer with new data."""
         data = np.asarray(data)
         if data.ndim == 3:
@@ -659,23 +888,91 @@ class Viewer2D(anywidget.AnyWidget):
 
         counts, edges = np.histogram(data.flatten(), bins=256)
         bin_centers = (edges[:-1] + edges[1:]) / 2
-        histogram_json = json.dumps({
-            "bins":   bin_centers.tolist(),
-            "counts": counts.tolist(),
-        })
+        histogram_json = json.dumps(
+            {
+                "bins": bin_centers.tolist(),
+                "counts": counts.tolist(),
+            }
+        )
 
         with self.hold_trait_notifications():
-            self.image_bytes    = img_u8.tobytes()
-            self.image_width    = w
-            self.image_height   = h
-            self.use_scalebar   = equal
-            self.scale_x        = float(abs(dx))
-            self.scale_y        = float(abs(dx))
-            self.x_axis_json    = json.dumps(x_axis.tolist())
-            self.y_axis_json    = json.dumps(y_axis.tolist())
+            self.image_bytes = img_u8.tobytes()
+            self.image_width = w
+            self.image_height = h
+            self.use_scalebar = equal
+            self.scale_x = float(abs(dx))
+            self.scale_y = float(abs(dx))
+            self.x_axis_json = json.dumps(x_axis.tolist())
+            self.y_axis_json = json.dumps(y_axis.tolist())
             self.histogram_data = histogram_json
-            self.hist_min       = float(vmin)
-            self.hist_max       = float(vmax)
+            self.hist_min = float(vmin)
+            self.hist_max = float(vmax)
             if units is not None:
                 self.units = units
 
+    # ------------------------------------------------------------------
+    def add_widget(self, kind: str, color: str = "#00e5ff", **kwargs) -> str:
+        """Add a moveable, resizable overlay widget to the viewer.
+
+        Parameters
+        ----------
+        kind : ``'circle'`` or ``'rectangle'``
+        color : str, optional
+            CSS colour (default cyan ``'#00e5ff'``).
+        **kwargs
+            circle     – ``cx``, ``cy`` (image px centre), ``r`` (radius).
+            rectangle  – ``x``, ``y`` (top-left, image px), ``w``, ``h``.
+
+        Returns
+        -------
+        str  Widget ID (pass to :meth:`remove_widget` / :meth:`get_widget`).
+        """
+        import uuid
+
+        kind = kind.lower()
+        if kind not in ("circle", "rectangle"):
+            raise ValueError(f"kind must be 'circle' or 'rectangle', got {kind!r}")
+        iw, ih = self.image_width, self.image_height
+        wid = str(uuid.uuid4())[:8]
+        if kind == "circle":
+            entry = {
+                "id": wid,
+                "type": "circle",
+                "cx": float(kwargs.get("cx", iw / 2)),
+                "cy": float(kwargs.get("cy", ih / 2)),
+                "r": float(kwargs.get("r", iw * 0.1)),
+                "color": color,
+            }
+        else:
+            entry = {
+                "id": wid,
+                "type": "rectangle",
+                "x": float(kwargs.get("x", iw * 0.25)),
+                "y": float(kwargs.get("y", ih * 0.25)),
+                "w": float(kwargs.get("w", iw * 0.5)),
+                "h": float(kwargs.get("h", ih * 0.5)),
+                "color": color,
+            }
+        widgets = json.loads(self.overlay_widgets)
+        widgets.append(entry)
+        self.overlay_widgets = json.dumps(widgets)
+        return wid
+
+    def remove_widget(self, wid: str) -> None:
+        """Remove overlay widget by ID."""
+        widgets = [w for w in json.loads(self.overlay_widgets) if w["id"] != wid]
+        self.overlay_widgets = json.dumps(widgets)
+
+    def clear_widgets(self) -> None:
+        """Remove all overlay widgets."""
+        self.overlay_widgets = "[]"
+
+    def get_widget(self, wid: str) -> dict:
+        """Return current state of a widget as a dict (position/size in image px).
+
+        Raises ``KeyError`` if *wid* does not exist.
+        """
+        for w in json.loads(self.overlay_widgets):
+            if w["id"] == wid:
+                return dict(w)
+        raise KeyError(f"No overlay widget with id {wid!r}")
