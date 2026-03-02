@@ -1,25 +1,40 @@
 """
 viewer2d.py
+===========
 
-A standalone 2D image viewer widget that accepts a numpy array directly.
-Supports:
- - x_axis / y_axis arrays for physical coordinates
- - Scale bar when x and y have equal (uniform) scales
- - X/Y axis rulers when scales differ
- - Zoom, pan, histogram, resize
+Standalone 2-D image viewer widget backed by `anywidget` / JavaScript canvas.
+
+Features
+--------
+* Optional physical ``x_axis`` / ``y_axis`` coordinate arrays.
+* Scale bar (uniform axes) or X/Y rulers (non-uniform axes).
+* Smooth zoom (mouse wheel) and pan (drag).
+* Pixel-perfect rendering — no interpolation/antialiasing.
+* Resizable canvas (drag the corner handle).
+* Intensity histogram with optional log scale and color bar.
+* Overlay *widgets* (circle, rectangle, annular, polygon, label) that are
+  draggable and resizable directly on the canvas.
+* Read-only *marker overlays* (circles, arrows, ellipses, lines, rectangles,
+  squares, texts) with optional hover tooltips per-marker and/or per-collection.
+* PyCharm / static-notebook fallback via ``image/png`` MIME bundle.
 """
+
+from __future__ import annotations
 
 import base64
 import io
 import json
+import uuid as _uuid
 
 import anywidget
 import numpy as np
 import traitlets
 
+__all__ = ["Viewer2D"]
+
 
 def _is_uniform(axis: np.ndarray, rtol: float = 1e-3) -> bool:
-    """Return True if the axis has a constant step size."""
+    """Return ``True`` if *axis* has a constant step size (uniform spacing)."""
     if len(axis) < 2:
         return True
     steps = np.diff(axis)
@@ -27,7 +42,7 @@ def _is_uniform(axis: np.ndarray, rtol: float = 1e-3) -> bool:
 
 
 def _equal_scale(x_axis: np.ndarray, y_axis: np.ndarray, rtol: float = 1e-3) -> bool:
-    """Return True when both axes are uniform AND have the same pixel size."""
+    """Return ``True`` when both axes are uniformly spaced with the same pixel size."""
     if not (_is_uniform(x_axis) and _is_uniform(y_axis)):
         return False
     dx = (x_axis[-1] - x_axis[0]) / (len(x_axis) - 1) if len(x_axis) > 1 else 1.0
@@ -36,43 +51,83 @@ def _equal_scale(x_axis: np.ndarray, y_axis: np.ndarray, rtol: float = 1e-3) -> 
 
 
 class Viewer2D(anywidget.AnyWidget):
-    """2-D image viewer that works directly with numpy arrays."""
+    """Interactive 2-D image viewer that works directly with NumPy arrays.
+
+    The widget renders in Jupyter / JupyterLab via ``anywidget``'s JavaScript
+    runtime, and falls back to a static PNG thumbnail in environments that
+    only support ``image/png`` (e.g. PyCharm's notebook preview).
+
+    Parameters
+    ----------
+    data : np.ndarray
+        2-D grayscale image of shape ``(H, W)``.  A 3-D array
+        ``(H, W, C)`` is accepted; only the first channel is used.
+    x_axis : array-like, optional
+        Physical coordinates for each column (length ``W``).
+        Defaults to ``np.arange(W)``.
+    y_axis : array-like, optional
+        Physical coordinates for each row (length ``H``).
+        Defaults to ``np.arange(H)``.
+    units : str, optional
+        Physical unit label shown on the scale bar / axes (default ``'px'``).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from hyperspy.viewer.viewer2d import Viewer2D
+    >>> v = Viewer2D(np.random.rand(256, 256))
+    >>> v  # display in a Jupyter cell
+    """
 
     # ------------------------------------------------------------------ traits
-    image_bytes = traitlets.Bytes(b"").tag(sync=True)
-    image_width = traitlets.Int(256).tag(sync=True)
+    # Image data — raw uint8 bytes (grayscale, row-major) synced to JS.
+    image_bytes  = traitlets.Bytes(b"").tag(sync=True)
+    image_width  = traitlets.Int(256).tag(sync=True)
     image_height = traitlets.Int(256).tag(sync=True)
 
-    viewer_width = traitlets.Int(256).tag(sync=True)
+    # Canvas display size in CSS pixels.
+    viewer_width  = traitlets.Int(256).tag(sync=True)
     viewer_height = traitlets.Int(256).tag(sync=True)
 
+    # Axis coordinate arrays (JSON-encoded float lists) and unit label.
     x_axis_json = traitlets.Unicode("[]").tag(sync=True)
     y_axis_json = traitlets.Unicode("[]").tag(sync=True)
-    units = traitlets.Unicode("px").tag(sync=True)
+    units       = traitlets.Unicode("px").tag(sync=True)
 
+    # Scale bar vs. axis rulers.
     use_scalebar = traitlets.Bool(True).tag(sync=True)
-    scale_x = traitlets.Float(1.0).tag(sync=True)
-    scale_y = traitlets.Float(1.0).tag(sync=True)
+    scale_x      = traitlets.Float(1.0).tag(sync=True)
+    scale_y      = traitlets.Float(1.0).tag(sync=True)
 
-    histogram_data = traitlets.Unicode('{"bins":[],"counts":[]}').tag(sync=True)
-    hist_min = traitlets.Float(0.0).tag(sync=True)
-    hist_max = traitlets.Float(255.0).tag(sync=True)
+    # Histogram panel.
+    histogram_data    = traitlets.Unicode('{"bins":[],"counts":[]}').tag(sync=True)
+    hist_min          = traitlets.Float(0.0).tag(sync=True)
+    hist_max          = traitlets.Float(255.0).tag(sync=True)
+    # Current display window — draggable in the histogram panel.
+    display_min       = traitlets.Float(0.0).tag(sync=True)
+    display_max       = traitlets.Float(255.0).tag(sync=True)
+    # 'linear' | 'log' | 'symlog'
+    scale_mode        = traitlets.Unicode("linear").tag(sync=True)
     histogram_visible = traitlets.Bool(True).tag(sync=True)
-    log_scale = traitlets.Bool(False).tag(sync=True)
-    show_colorbar = traitlets.Bool(True).tag(sync=True)
-    colorbar_width = traitlets.Int(20).tag(sync=True)
-    histogram_width = traitlets.Int(120).tag(sync=True)
-    gap = traitlets.Int(10).tag(sync=True)
+    log_scale         = traitlets.Bool(False).tag(sync=True)
+    show_colorbar     = traitlets.Bool(True).tag(sync=True)
+    colorbar_width    = traitlets.Int(20).tag(sync=True)
+    histogram_width   = traitlets.Int(120).tag(sync=True)
+    gap               = traitlets.Int(10).tag(sync=True)
 
-    zoom = traitlets.Float(1.0).tag(sync=True)
+    # Zoom / pan state.
+    zoom     = traitlets.Float(1.0).tag(sync=True)
     center_x = traitlets.Float(0.5).tag(sync=True)
     center_y = traitlets.Float(0.5).tag(sync=True)
 
-    # Overlay widgets – JSON list of shape dicts synced to JS
+    # Overlay widgets — JSON list of moveable/resizable shape dicts.
+    # Shapes: circle, rectangle, annular, polygon, label.
     overlay_widgets = traitlets.Unicode("[]").tag(sync=True)
 
-    # Marker overlay – mirrors Circles(Markers): list of marker-set dicts
-    # Each dict: { offsets:[[x,y],...], sizes:[r,...], color, linewidth }
+    # Marker overlays — JSON list of read-only marker-set dicts.
+    # Each dict: { id, type, offsets/segments/…, color, linewidth,
+    #              label?, labels? }
+    # Types: circles, arrows, ellipses, lines, rectangles, squares, texts.
     markers_json = traitlets.Unicode("[]").tag(sync=True)
 
     # ------------------------------------------------------------------ JS
@@ -161,6 +216,15 @@ class Viewer2D(anywidget.AnyWidget):
         'border-radius:4px;pointer-events:none;display:none;';
       canvasWrapper.appendChild(zoomDisplay);
 
+      // Marker tooltip
+      const markerTooltip = document.createElement('div');
+      markerTooltip.style.cssText =
+        'position:fixed;padding:5px 9px;font-size:12px;font-family:sans-serif;' +
+        'background:rgba(30,30,30,0.92);color:#fff;border-radius:4px;' +
+        'pointer-events:none;white-space:pre;display:none;z-index:9999;' +
+        'box-shadow:0 2px 6px rgba(0,0,0,0.4);max-width:260px;';
+      document.body.appendChild(markerTooltip);
+
       // Histogram canvas
       const histCanvas = document.createElement('canvas');
       histCanvas.style.cssText =
@@ -192,25 +256,25 @@ class Viewer2D(anywidget.AnyWidget):
       let isResizing = false, isPanning = false;
       let startX, startY, startWidth, startHeight;
       let panStartX, panStartY, panStartCenterX, panStartCenterY;
+      let _suppressSyncResize = false;
 
       // ── syncCanvasSizes ────────────────────────────────────────────────────
       function syncCanvasSizes() {
+        // Suppressed while a resize drag is committing both traits at once.
+        if (_suppressSyncResize) return;
+
         const useScalebar = model.get('use_scalebar');
         const w = model.get('viewer_width');
         const h = model.get('viewer_height');
 
-        imageCanvas.width  = w * dpr;  imageCanvas.height = h * dpr;
-        imageCanvas.style.width  = w + 'px';  imageCanvas.style.height = h + 'px';
-        imgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        imgCtx.imageSmoothingEnabled = false;
+        // Only resize if both traits have actually settled to the same values
+        // that are already on the canvas — guards against the partial-update
+        // race where change:viewer_width fires before change:viewer_height.
+        const curW = parseInt(imageCanvas.style.width)  || 0;
+        const curH = parseInt(imageCanvas.style.height) || 0;
+        if (curW === w && curH === h) return;   // already correct, nothing to do
 
-        overlayCanvas.width  = w * dpr;  overlayCanvas.height = h * dpr;
-        overlayCanvas.style.width  = w + 'px';  overlayCanvas.style.height = h + 'px';
-        ovCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-        markersCanvas.width  = w * dpr;  markersCanvas.height = h * dpr;
-        markersCanvas.style.width  = w + 'px';  markersCanvas.style.height = h + 'px';
-        mkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        _applyCanvasSize(w, h);
 
         if (useScalebar) {
           xAxisCanvas.style.display = 'none';
@@ -324,10 +388,10 @@ class Viewer2D(anywidget.AnyWidget):
       function drawImage() {
         const raw = model.get('image_bytes');
         let bytes;
-        if (raw instanceof Uint8Array)                    bytes = raw;
-        else if (raw instanceof ArrayBuffer)              bytes = new Uint8Array(raw);
+        if (raw instanceof Uint8Array)                     bytes = raw;
+        else if (raw instanceof ArrayBuffer)               bytes = new Uint8Array(raw);
         else if (raw && raw.buffer instanceof ArrayBuffer) bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-        else                                              bytes = new Uint8Array(0);
+        else                                               bytes = new Uint8Array(0);
 
         const iw = model.get('image_width'),  ih = model.get('image_height');
         const cw = parseInt(imageCanvas.style.width)  || model.get('viewer_width');
@@ -338,9 +402,48 @@ class Viewer2D(anywidget.AnyWidget):
 
         imgCtx.imageSmoothingEnabled = false;
 
+        // Remap raw uint8 values through display window + scale mode.
+        const dMin  = model.get('display_min');
+        const dMax  = model.get('display_max');
+        const hMin  = model.get('hist_min');
+        const hMax  = model.get('hist_max');
+        const mode  = model.get('scale_mode');   // 'linear' | 'log' | 'symlog'
+        const range = hMax - hMin || 1;
+
+        // Convert raw uint8 [0,255] back to data value, then remap to [0,255].
+        const lut = new Uint8Array(256);
+        for (let raw8 = 0; raw8 < 256; raw8++) {
+          // data value corresponding to this uint8
+          const val = hMin + (raw8 / 255) * range;
+          let t;
+          if (mode === 'log') {
+            const dMinC  = Math.max(dMin,  1e-10);
+            const dMaxC  = Math.max(dMax,  dMinC + 1e-10);
+            const valC   = Math.max(val,   1e-10);
+            t = (Math.log10(valC) - Math.log10(dMinC)) / (Math.log10(dMaxC) - Math.log10(dMinC));
+          } else if (mode === 'symlog') {
+            const linThresh = Math.max((dMax - dMin) * 0.01, 1e-10);
+            const symlogVal = val >= 0
+              ? (val <= linThresh ? val / linThresh : 1 + Math.log10(val / linThresh))
+              : -(Math.abs(val) <= linThresh ? Math.abs(val) / linThresh : 1 + Math.log10(Math.abs(val) / linThresh));
+            const symlogMin = dMin >= 0
+              ? (dMin <= linThresh ? dMin / linThresh : 1 + Math.log10(dMin / linThresh))
+              : -(Math.abs(dMin) <= linThresh ? Math.abs(dMin) / linThresh : 1 + Math.log10(Math.abs(dMin) / linThresh));
+            const symlogMax = dMax >= 0
+              ? (dMax <= linThresh ? dMax / linThresh : 1 + Math.log10(dMax / linThresh))
+              : -(Math.abs(dMax) <= linThresh ? Math.abs(dMax) / linThresh : 1 + Math.log10(Math.abs(dMax) / linThresh));
+            const symRange = symlogMax - symlogMin || 1;
+            t = (symlogVal - symlogMin) / symRange;
+          } else {
+            // linear
+            t = (val - dMin) / ((dMax - dMin) || 1);
+          }
+          lut[raw8] = Math.max(0, Math.min(255, Math.round(t * 255)));
+        }
+
         const imageData = imgCtx.createImageData(iw, ih);
         for (let i = 0; i < bytes.length; i++) {
-          const g = bytes[i];
+          const g = lut[bytes[i]];
           imageData.data[i * 4]     = g;
           imageData.data[i * 4 + 1] = g;
           imageData.data[i * 4 + 2] = g;
@@ -370,27 +473,54 @@ class Viewer2D(anywidget.AnyWidget):
       }
 
       // ── histogram ──────────────────────────────────────────────────────────
+      // Histogram drag state
+      let histDrag = null;   // null | 'min' | 'max'
+
+      // Convert a data value to a y-pixel position within the histogram chart area.
+      function _dataToHistY(val, h) {
+        const hMin = model.get('hist_min'), hMax = model.get('hist_max');
+        return h - (val - hMin) / ((hMax - hMin) || 1) * h;
+      }
+
+      // Convert a y-pixel within the histogram chart area to a data value.
+      function _histYToData(py, h) {
+        const hMin = model.get('hist_min'), hMax = model.get('hist_max');
+        return hMin + (1 - py / h) * ((hMax - hMin) || 1);
+      }
+
       function drawHistogram() {
         if (!model.get('histogram_visible')) return;
-        const histData = JSON.parse(model.get('histogram_data'));
-        const counts = histData.counts;
-        const w = parseInt(histCanvas.style.width)  || histWidth;
-        const h = parseInt(histCanvas.style.height) || model.get('viewer_height');
-        const useLog = model.get('log_scale');
-        const showCB = model.get('show_colorbar');
-        const cbW    = model.get('colorbar_width');
+        const histData  = JSON.parse(model.get('histogram_data'));
+        const counts    = histData.counts;
+        const w         = parseInt(histCanvas.style.width)  || histWidth;
+        const h         = parseInt(histCanvas.style.height) || model.get('viewer_height');
+        const showCB    = model.get('show_colorbar');
+        const cbW       = model.get('colorbar_width');
+        const mode      = model.get('scale_mode');
+        const dMin      = model.get('display_min');
+        const dMax      = model.get('display_max');
+        const hMin      = model.get('hist_min');
+        const hMax      = model.get('hist_max');
 
         histCtx.clearRect(0, 0, w, h);
         if (!counts || counts.length === 0) return;
 
+        // ── bars ────────────────────────────────────────────────────────────
+        // The bars always represent pixel-count frequency; log_scale (the 'h'
+        // toggle) compresses tall spikes in the *count* axis.  scale_mode
+        // (l / s keys) only affects how image intensities are mapped and is
+        // intentionally NOT applied to the bars themselves.
+        const useLogCounts = model.get('log_scale');
         let proc = counts.slice();
-        if (useLog) proc = counts.map(c => c > 0 ? Math.log10(c + 1) : 0);
+        if (useLogCounts) proc = counts.map(c => c > 0 ? Math.log10(c + 1) : 0);
         const maxC   = Math.max(...proc, 1);
         const chartX = showCB ? cbW + 5 : 0;
         const chartW = w - chartX;
         const barH   = h / counts.length;
 
-        histCtx.fillStyle = '#4CAF50'; histCtx.strokeStyle = '#2E7D32'; histCtx.lineWidth = 0.5;
+        histCtx.fillStyle = '#4CAF50';
+        histCtx.strokeStyle = '#2E7D32';
+        histCtx.lineWidth = 0.5;
         for (let i = 0; i < counts.length; i++) {
           const idx = counts.length - 1 - i;
           const bw  = (proc[idx] / maxC) * chartW;
@@ -401,20 +531,170 @@ class Viewer2D(anywidget.AnyWidget):
           }
         }
 
+        // ── colorbar (reflects current scale mode) ──────────────────────────
         if (showCB) {
           const g = histCtx.createLinearGradient(0, 0, 0, h);
-          for (let i = 0; i <= 10; i++) {
-            const v = Math.round((1 - i / 10) * 255);
-            g.addColorStop(i / 10, `rgb(${v},${v},${v})`);
+          const steps = 32;
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            // position in data space (top = hMax, bottom = hMin)
+            const val = hMin + (1 - t) * (hMax - hMin);
+            // normalise val through display window + scale mode → grey [0,1]
+            let mapped;
+            if (mode === 'log') {
+              const dMinC = Math.max(dMin, 1e-10), dMaxC = Math.max(dMax, dMinC + 1e-10);
+              const valC  = Math.max(val,  1e-10);
+              mapped = (Math.log10(valC) - Math.log10(dMinC)) / (Math.log10(dMaxC) - Math.log10(dMinC));
+            } else if (mode === 'symlog') {
+              const linThresh = Math.max((dMax - dMin) * 0.01, 1e-10);
+              const sl = v => v >= 0
+                ? (v <= linThresh ? v / linThresh : 1 + Math.log10(v / linThresh))
+                : -(Math.abs(v) <= linThresh ? Math.abs(v) / linThresh : 1 + Math.log10(Math.abs(v) / linThresh));
+              const slRange = (sl(dMax) - sl(dMin)) || 1;
+              mapped = (sl(val) - sl(dMin)) / slRange;
+            } else {
+              mapped = (val - dMin) / ((dMax - dMin) || 1);
+            }
+            const grey = Math.max(0, Math.min(255, Math.round(mapped * 255)));
+            g.addColorStop(t, `rgb(${grey},${grey},${grey})`);
           }
-          histCtx.fillStyle = g; histCtx.fillRect(0, 0, cbW, h);
-          histCtx.strokeStyle = '#666'; histCtx.lineWidth = 1; histCtx.strokeRect(0, 0, cbW, h);
+          histCtx.fillStyle = g;
+          histCtx.fillRect(0, 0, cbW, h);
+          histCtx.strokeStyle = '#666';
+          histCtx.lineWidth = 1;
+          histCtx.strokeRect(0, 0, cbW, h);
         }
 
-        histCtx.fillStyle = '#666'; histCtx.font = '10px monospace'; histCtx.textAlign = 'left';
-        histCtx.fillText(model.get('hist_max').toFixed(0), chartX + 2, 12);
-        histCtx.fillText(model.get('hist_min').toFixed(0), chartX + 2, h - 3);
+        // ── min/max labels ──────────────────────────────────────────────────
+        histCtx.fillStyle = '#666';
+        histCtx.font = '10px monospace';
+        histCtx.textAlign = 'left';
+        histCtx.fillText(hMax.toFixed(2), chartX + 2, 12);
+        histCtx.fillText(hMin.toFixed(2), chartX + 2, h - 3);
+
+        // ── draggable display_min / display_max lines ───────────────────────
+        const yMax = _dataToHistY(dMax, h);
+        const yMin = _dataToHistY(dMin, h);
+
+        // Clamp display lines to visible area
+        const yMaxCl = Math.max(2,  Math.min(h - 2, yMax));
+        const yMinCl = Math.max(2,  Math.min(h - 2, yMin));
+
+        // Max line (bright white + label)
+        histCtx.save();
+        histCtx.strokeStyle = '#ffffff';
+        histCtx.lineWidth = 2;
+        histCtx.setLineDash([4, 3]);
+        histCtx.beginPath();
+        histCtx.moveTo(chartX, yMaxCl);
+        histCtx.lineTo(w, yMaxCl);
+        histCtx.stroke();
+        histCtx.setLineDash([]);
+        histCtx.fillStyle = 'rgba(0,0,0,0.6)';
+        const maxLabel = dMax.toFixed(2);
+        const maxLW = histCtx.measureText(maxLabel).width + 6;
+        histCtx.fillRect(w - maxLW - 2, yMaxCl - 13, maxLW + 2, 13);
+        histCtx.fillStyle = '#fff';
+        histCtx.font = '9px monospace';
+        histCtx.textAlign = 'right';
+        histCtx.fillText(maxLabel, w - 3, yMaxCl - 2);
+        histCtx.restore();
+
+        // Min line
+        histCtx.save();
+        histCtx.strokeStyle = '#aaaaff';
+        histCtx.lineWidth = 2;
+        histCtx.setLineDash([4, 3]);
+        histCtx.beginPath();
+        histCtx.moveTo(chartX, yMinCl);
+        histCtx.lineTo(w, yMinCl);
+        histCtx.stroke();
+        histCtx.setLineDash([]);
+        histCtx.fillStyle = 'rgba(0,0,0,0.6)';
+        const minLabel = dMin.toFixed(2);
+        const minLW = histCtx.measureText(minLabel).width + 6;
+        histCtx.fillRect(w - minLW - 2, yMinCl, minLW + 2, 13);
+        histCtx.fillStyle = '#aaaaff';
+        histCtx.font = '9px monospace';
+        histCtx.textAlign = 'right';
+        histCtx.fillText(minLabel, w - 3, yMinCl + 11);
+        histCtx.restore();
+
+        // ── scale mode badge ────────────────────────────────────────────────
+        if (mode !== 'linear') {
+          const badge = mode === 'log' ? 'LOG' : 'SYMLOG';
+          histCtx.save();
+          histCtx.font = 'bold 9px monospace';
+          histCtx.fillStyle = 'rgba(255,180,0,0.9)';
+          histCtx.textAlign = 'right';
+          histCtx.fillText(badge, w - 3, h - 3);
+          histCtx.restore();
+        }
       }
+
+      // ── histogram drag (min/max lines) ─────────────────────────────────────
+      const HIST_DRAG_TOL = 6;   // px tolerance for grabbing a line
+
+      histCanvas.style.cursor = 'default';
+
+      histCanvas.addEventListener('mousedown', (e) => {
+        const rect  = histCanvas.getBoundingClientRect();
+        const my    = e.clientY - rect.top;
+        const h     = rect.height;
+        const yMax  = _dataToHistY(model.get('display_max'), h);
+        const yMin  = _dataToHistY(model.get('display_min'), h);
+        if (Math.abs(my - yMax) <= HIST_DRAG_TOL) {
+          histDrag = 'max'; e.preventDefault();
+        } else if (Math.abs(my - yMin) <= HIST_DRAG_TOL) {
+          histDrag = 'min'; e.preventDefault();
+        }
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!histDrag) return;
+        const rect = histCanvas.getBoundingClientRect();
+        const my   = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+        let val    = _histYToData(my, rect.height);
+        const hMin = model.get('hist_min'), hMax = model.get('hist_max');
+        val = Math.max(hMin, Math.min(hMax, val));
+
+        if (histDrag === 'max') {
+          const dMin = model.get('display_min');
+          if (val > dMin) {
+            model.set('display_max', val);
+            model.save_changes();
+          }
+        } else {
+          const dMax = model.get('display_max');
+          if (val < dMax) {
+            model.set('display_min', val);
+            model.save_changes();
+          }
+        }
+        e.preventDefault();
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (histDrag) { histDrag = null; }
+      });
+
+      histCanvas.addEventListener('mousemove', (e) => {
+        if (histDrag) return;
+        const rect = histCanvas.getBoundingClientRect();
+        const my   = e.clientY - rect.top;
+        const h    = rect.height;
+        const yMax = _dataToHistY(model.get('display_max'), h);
+        const yMin = _dataToHistY(model.get('display_min'), h);
+        if (Math.abs(my - yMax) <= HIST_DRAG_TOL || Math.abs(my - yMin) <= HIST_DRAG_TOL) {
+          histCanvas.style.cursor = 'ns-resize';
+        } else {
+          histCanvas.style.cursor = 'default';
+        }
+      });
+
+      histCanvas.addEventListener('mouseleave', () => {
+        if (!histDrag) histCanvas.style.cursor = 'default';
+      });
 
       // ── marker overlay ─────────────────────────────────────────────────────
       // markers_json is a JSON array of marker-set objects. Each has a 'type'
@@ -635,13 +915,29 @@ class Viewer2D(anywidget.AnyWidget):
           ovCtx.save();
           ovCtx.strokeStyle = w.color || '#00e5ff';
           ovCtx.lineWidth   = 2;
+
           if (w.type === 'circle') {
             const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
             const cr = w.r * scale;
             ovCtx.beginPath();
             ovCtx.arc(ccx, ccy, cr, 0, Math.PI * 2);
             ovCtx.stroke();
-            _drawHandle(ccx + cr, ccy, w.color);
+            _drawHandle(ccx + cr, ccy, w.color);  // outer resize handle (right)
+
+          } else if (w.type === 'annular') {
+            // Two concentric circles: outer radius r_outer, inner radius r_inner
+            const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
+            const ro = w.r_outer * scale;
+            const ri = w.r_inner * scale;
+            ovCtx.beginPath();
+            ovCtx.arc(ccx, ccy, ro, 0, Math.PI * 2);
+            ovCtx.stroke();
+            ovCtx.beginPath();
+            ovCtx.arc(ccx, ccy, ri, 0, Math.PI * 2);
+            ovCtx.stroke();
+            _drawHandle(ccx + ro, ccy, w.color);              // outer resize
+            _drawHandle(ccx + ri, ccy - ri * 0.3, w.color);  // inner resize (offset so handles don't overlap when ri≈ro)
+
           } else if (w.type === 'rectangle') {
             const [rx, ry] = _imgToCanvas(w.x, w.y);
             const rw = w.w * scale, rh = w.h * scale;
@@ -650,7 +946,38 @@ class Viewer2D(anywidget.AnyWidget):
             _drawHandle(rx + rw, ry,      w.color);
             _drawHandle(rx,      ry + rh, w.color);
             _drawHandle(rx + rw, ry + rh, w.color);
+
+          } else if (w.type === 'polygon') {
+            const verts = w.vertices || [];
+            if (verts.length >= 2) {
+              ovCtx.beginPath();
+              const [px0, py0] = _imgToCanvas(verts[0][0], verts[0][1]);
+              ovCtx.moveTo(px0, py0);
+              for (let k = 1; k < verts.length; k++) {
+                const [px, py] = _imgToCanvas(verts[k][0], verts[k][1]);
+                ovCtx.lineTo(px, py);
+              }
+              ovCtx.closePath();
+              ovCtx.stroke();
+              // vertex handles
+              for (const v of verts) {
+                const [px, py] = _imgToCanvas(v[0], v[1]);
+                _drawHandle(px, py, w.color);
+              }
+            }
+
+          } else if (w.type === 'label') {
+            const [lx, ly] = _imgToCanvas(w.x, w.y);
+            const fs = (w.fontsize || 14);
+            ovCtx.font      = `${fs}px sans-serif`;
+            ovCtx.fillStyle = w.color || '#00e5ff';
+            ovCtx.textAlign    = 'left';
+            ovCtx.textBaseline = 'top';
+            ovCtx.fillText(w.text || '', lx, ly);
+            // small drag handle at anchor point
+            _drawHandle(lx, ly, w.color);
           }
+
           ovCtx.restore();
         }
       }
@@ -664,6 +991,23 @@ class Viewer2D(anywidget.AnyWidget):
           const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
           return [{ x: ccx + w.r * scale, y: ccy }];
         }
+        if (w.type === 'annular') {
+          const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
+          const ro = w.r_outer * scale, ri = w.r_inner * scale;
+          return [
+            { x: ccx + ro, y: ccy },                       // hi=0 outer
+            { x: ccx + ri, y: ccy - ri * 0.3 },            // hi=1 inner
+          ];
+        }
+        if (w.type === 'polygon') {
+          const verts = w.vertices || [];
+          return verts.map(v => { const [px,py]=_imgToCanvas(v[0],v[1]); return {x:px,y:py}; });
+        }
+        if (w.type === 'label') {
+          const [lx, ly] = _imgToCanvas(w.x, w.y);
+          return [{ x: lx, y: ly }];
+        }
+        // rectangle (default)
         const [rx, ry] = _imgToCanvas(w.x, w.y);
         const rw = w.w * scale, rh = w.h * scale;
         return [{ x: rx, y: ry }, { x: rx + rw, y: ry },
@@ -674,7 +1018,7 @@ class Viewer2D(anywidget.AnyWidget):
         const widgets = JSON.parse(model.get('overlay_widgets'));
         const rect    = imageCanvas.getBoundingClientRect();
         const mx = ex - rect.left, my = ey - rect.top;
-        // Handles first
+        // Handles first (highest priority)
         for (let i = widgets.length - 1; i >= 0; i--) {
           const hs = _handles(widgets[i]);
           for (let hi = 0; hi < hs.length; hi++) {
@@ -683,7 +1027,7 @@ class Viewer2D(anywidget.AnyWidget):
               return { idx: i, mode: 'resize', hi };
           }
         }
-        // Body
+        // Body hit
         const scale = _imgScale();
         for (let i = widgets.length - 1; i >= 0; i--) {
           const w = widgets[i];
@@ -692,7 +1036,29 @@ class Viewer2D(anywidget.AnyWidget):
             const dx = mx - ccx, dy = my - ccy;
             if (Math.sqrt(dx * dx + dy * dy) <= w.r * scale + 4)
               return { idx: i, mode: 'move', hi: -1 };
+          } else if (w.type === 'annular') {
+            const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
+            const dist = Math.sqrt((mx-ccx)**2 + (my-ccy)**2);
+            if (dist <= w.r_outer * scale + 4)
+              return { idx: i, mode: 'move', hi: -1 };
+          } else if (w.type === 'polygon') {
+            // point-in-polygon (ray casting)
+            const verts = w.vertices || [];
+            let inside = false;
+            for (let a = 0, b = verts.length - 1; a < verts.length; b = a++) {
+              const [ax, ay] = _imgToCanvas(verts[a][0], verts[a][1]);
+              const [bx, by] = _imgToCanvas(verts[b][0], verts[b][1]);
+              if (((ay > my) !== (by > my)) && (mx < (bx - ax) * (my - ay) / (by - ay) + ax))
+                inside = !inside;
+            }
+            if (inside) return { idx: i, mode: 'move', hi: -1 };
+          } else if (w.type === 'label') {
+            const [lx, ly] = _imgToCanvas(w.x, w.y);
+            // generous hit box around the anchor handle
+            if (Math.abs(mx - lx) <= 20 && Math.abs(my - ly) <= 20)
+              return { idx: i, mode: 'move', hi: -1 };
           } else {
+            // rectangle
             const [rx, ry] = _imgToCanvas(w.x, w.y);
             const rw = w.w * scale, rh = w.h * scale;
             if (mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh)
@@ -739,14 +1105,41 @@ class Viewer2D(anywidget.AnyWidget):
           if (s.type === 'circle') {
             widgets[ovDrag.idx].cx = s.cx + dx;
             widgets[ovDrag.idx].cy = s.cy + dy;
+          } else if (s.type === 'annular') {
+            widgets[ovDrag.idx].cx = s.cx + dx;
+            widgets[ovDrag.idx].cy = s.cy + dy;
+          } else if (s.type === 'polygon') {
+            widgets[ovDrag.idx].vertices = s.vertices.map(v => [v[0]+dx, v[1]+dy]);
+          } else if (s.type === 'label') {
+            widgets[ovDrag.idx].x = s.x + dx;
+            widgets[ovDrag.idx].y = s.y + dy;
           } else {
             widgets[ovDrag.idx].x = s.x + dx;
             widgets[ovDrag.idx].y = s.y + dy;
           }
         } else {
+          // resize
           if (s.type === 'circle') {
             widgets[ovDrag.idx].r = Math.max(2,
               Math.sqrt((ix - s.cx) ** 2 + (iy - s.cy) ** 2));
+          } else if (s.type === 'annular') {
+            const dist = Math.sqrt((ix - s.cx) ** 2 + (iy - s.cy) ** 2);
+            if (ovDrag.hi === 0) {
+              // outer handle
+              widgets[ovDrag.idx].r_outer = Math.max(s.r_inner + 2, dist);
+            } else {
+              // inner handle
+              widgets[ovDrag.idx].r_inner = Math.max(2, Math.min(s.r_outer - 2, dist));
+            }
+          } else if (s.type === 'polygon') {
+            // move the specific vertex
+            const verts = s.vertices.map(v => [v[0], v[1]]);
+            verts[ovDrag.hi] = [ix, iy];
+            widgets[ovDrag.idx].vertices = verts;
+          } else if (s.type === 'label') {
+            // labels don't have a separate resize handle – treat as move
+            widgets[ovDrag.idx].x = s.x + dx;
+            widgets[ovDrag.idx].y = s.y + dy;
           } else {
             let nx = s.x, ny = s.y, nw = s.w, nh = s.h;
             if      (ovDrag.hi === 0) { nx = s.x+dx; ny = s.y+dy; nw = s.w-dx; nh = s.h-dy; }
@@ -771,15 +1164,6 @@ class Viewer2D(anywidget.AnyWidget):
         e.preventDefault();
       }, true);
 
-      // hover cursor
-      imageCanvas.addEventListener('mousemove', (e) => {
-        if (ovDrag || isPanning || isResizing) return;
-        const hit = _hitTest(e.clientX, e.clientY);
-        imageCanvas.style.cursor = hit
-          ? (hit.mode === 'resize' ? 'nwse-resize' : 'move')
-          : 'default';
-      });
-
       // ── resize ─────────────────────────────────────────────────────────────
       resizeHandle.addEventListener('mousedown', (e) => {
         isResizing = true;
@@ -790,6 +1174,29 @@ class Viewer2D(anywidget.AnyWidget):
         e.preventDefault();
       });
 
+      function _applyCanvasSize(nw, nh) {
+        // Apply a new canvas size to every canvas in sync.
+        nw = Math.round(nw); nh = Math.round(nh);
+        imageCanvas.style.width  = nw + 'px'; imageCanvas.style.height = nh + 'px';
+        imageCanvas.width = nw * dpr; imageCanvas.height = nh * dpr;
+        imgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        imgCtx.imageSmoothingEnabled = false;
+        overlayCanvas.style.width  = nw + 'px'; overlayCanvas.style.height = nh + 'px';
+        overlayCanvas.width = nw * dpr; overlayCanvas.height = nh * dpr;
+        ovCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        markersCanvas.style.width  = nw + 'px'; markersCanvas.style.height = nh + 'px';
+        markersCanvas.width = nw * dpr; markersCanvas.height = nh * dpr;
+        mkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        histCanvas.style.height = nh + 'px'; histCanvas.height = nh * dpr;
+        histCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if (!model.get('use_scalebar')) {
+          xAxisCanvas.style.width  = nw + 'px'; xAxisCanvas.width  = nw * dpr;
+          yAxisCanvas.style.height = nh + 'px'; yAxisCanvas.height = nh * dpr;
+          xCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          yCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+      }
+
       document.addEventListener('mousemove', (e) => {
         if (isResizing) {
           const dX = e.clientX - startX, dY = e.clientY - startY;
@@ -798,30 +1205,13 @@ class Viewer2D(anywidget.AnyWidget):
           if (imgW > 0 && imgH > 0) {
             const ar = imgW / imgH, avg = (dX + dY) / 2;
             nw = Math.max(128, startWidth + avg);
-            nh = Math.max(128, nw / ar);
+            nh = nw / ar;
             if (nh < 128) { nh = 128; nw = nh * ar; }
           } else {
             nw = Math.max(128, startWidth  + dX);
             nh = Math.max(128, startHeight + dY);
           }
-          imageCanvas.style.width  = nw + 'px'; imageCanvas.style.height = nh + 'px';
-          imageCanvas.width = nw * dpr; imageCanvas.height = nh * dpr;
-          imgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          imgCtx.imageSmoothingEnabled = false;
-          overlayCanvas.style.width  = nw + 'px'; overlayCanvas.style.height = nh + 'px';
-          overlayCanvas.width = nw * dpr; overlayCanvas.height = nh * dpr;
-          ovCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          markersCanvas.style.width  = nw + 'px'; markersCanvas.style.height = nh + 'px';
-          markersCanvas.width = nw * dpr; markersCanvas.height = nh * dpr;
-          mkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          histCanvas.style.height = nh + 'px'; histCanvas.height = nh * dpr;
-          histCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          if (!model.get('use_scalebar')) {
-            xAxisCanvas.style.width = nw + 'px'; xAxisCanvas.width = nw * dpr;
-            yAxisCanvas.style.height = nh + 'px'; yAxisCanvas.height = nh * dpr;
-            xCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            yCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          }
+          _applyCanvasSize(nw, nh);
           sizeLabel.textContent = `${Math.round(nw)} × ${Math.round(nh)}`;
           drawImage(); drawHistogram();
           e.preventDefault();
@@ -839,9 +1229,17 @@ class Viewer2D(anywidget.AnyWidget):
         if (isResizing) {
           isResizing = false;
           sizeLabel.style.display = 'none';
-          model.set('viewer_width',  Math.round(parseInt(imageCanvas.style.width)));
-          model.set('viewer_height', Math.round(parseInt(imageCanvas.style.height)));
+          // Read the final canvas size, recompute height from aspect ratio so
+          // the two traits are always consistent before saving.
+          const nw = parseInt(imageCanvas.style.width);
+          const nh = parseInt(imageCanvas.style.height);
+          // Suppress the change listeners while we set both traits at once
+          // so syncCanvasSizes doesn't fire mid-update with mismatched values.
+          _suppressSyncResize = true;
+          model.set('viewer_width',  nw);
+          model.set('viewer_height', nh);
           model.save_changes();
+          _suppressSyncResize = false;
         }
         if (isPanning) {
           isPanning = false;
@@ -876,19 +1274,200 @@ class Viewer2D(anywidget.AnyWidget):
 
       // ── keyboard shortcuts ─────────────────────────────────────────────────
       imageCanvas.addEventListener('keydown', (e) => {
-        if (e.key === 'r' || e.key === 'R') {
-          model.set('zoom', 1.0); model.set('center_x', 0.5); model.set('center_y', 0.5);
-          model.save_changes(); zoomDisplay.style.display = 'none'; e.preventDefault();
-        } else if (e.key === 'h' || e.key === 'H') {
+        const key = e.key.toLowerCase();
+        if (key === 'r') {
+          // Reset zoom, pan, and display clim to defaults.
+          model.set('zoom', 1.0);
+          model.set('center_x', 0.5);
+          model.set('center_y', 0.5);
+          model.set('display_min', model.get('hist_min'));
+          model.set('display_max', model.get('hist_max'));
+          model.save_changes();
+          zoomDisplay.style.display = 'none';
+          e.preventDefault();
+        } else if (key === 'l') {
+          // Toggle between linear and log scale.
+          const next = model.get('scale_mode') === 'log' ? 'linear' : 'log';
+          model.set('scale_mode', next);
+          model.save_changes();
+          e.preventDefault();
+        } else if (key === 's') {
+          // Toggle between linear and symlog scale.
+          const next = model.get('scale_mode') === 'symlog' ? 'linear' : 'symlog';
+          model.set('scale_mode', next);
+          model.save_changes();
+          e.preventDefault();
+        } else if (key === 'h') {
           model.set('histogram_visible', !model.get('histogram_visible'));
-          model.save_changes(); e.preventDefault();
+          model.save_changes();
+          e.preventDefault();
         }
+      });
+
+      // ── marker hover / tooltip ─────────────────────────────────────────────
+      // Each marker set may carry:
+      //   label   : string  – shown when hovering anywhere over the collection
+      //   labels  : [str, …] – per-element label; shown instead of / in addition to label
+      //
+      // Hit-test tolerance in canvas px:
+      const MARKER_HIT = 8;
+
+      function _markerHitTest(mx, my) {
+        // Returns { collectionLabel, markerLabel, x, y } or null.
+        let sets;
+        try { sets = JSON.parse(model.get('markers_json')); }
+        catch (_) { return null; }
+        if (!Array.isArray(sets)) return null;
+
+        const scale = _imgScale();
+
+        // Iterate in reverse so topmost set wins
+        for (let si = sets.length - 1; si >= 0; si--) {
+          const ms   = sets[si];
+          const type = ms.type || 'circles';
+          const collLabel = ms.label != null ? String(ms.label) : null;
+          const perLabels = Array.isArray(ms.labels) ? ms.labels : null;
+
+          // Skip sets that have neither a collection label nor per-marker labels
+          if (collLabel === null && perLabels === null) continue;
+
+          if (type === 'circles') {
+            const offsets = ms.offsets || [], sizes = ms.sizes || [];
+            for (let i = 0; i < offsets.length; i++) {
+              const [cx, cy] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              const r = (sizes[i] != null ? sizes[i] : (sizes[0] != null ? sizes[0] : 5)) * scale;
+              if (Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2) <= r + MARKER_HIT)
+                return { collectionLabel: collLabel,
+                         markerLabel: perLabels ? String(perLabels[i] ?? '') : null,
+                         x: cx, y: cy };
+            }
+
+          } else if (type === 'arrows') {
+            const offsets = ms.offsets || [], Us = ms.U || [], Vs = ms.V || [];
+            for (let i = 0; i < offsets.length; i++) {
+              const [x1, y1] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              const u = (Us[i] != null ? Us[i] : 0) * scale;
+              const v = (Vs[i] != null ? Vs[i] : 0) * scale;
+              // hit if within MARKER_HIT px of the shaft midpoint
+              const midx = x1 + u / 2, midy = y1 + v / 2;
+              if (Math.sqrt((mx - midx) ** 2 + (my - midy) ** 2) <= Math.max(MARKER_HIT, Math.sqrt(u*u+v*v) / 2 + 4))
+                return { collectionLabel: collLabel,
+                         markerLabel: perLabels ? String(perLabels[i] ?? '') : null,
+                         x: midx, y: midy };
+            }
+
+          } else if (type === 'ellipses') {
+            const offsets = ms.offsets || [], widths = ms.widths || [], heights = ms.heights || [];
+            for (let i = 0; i < offsets.length; i++) {
+              const [cx, cy] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              const rw = (widths[i]  != null ? widths[i]  : (widths[0]  != null ? widths[0]  : 10)) * scale / 2;
+              const rh = (heights[i] != null ? heights[i] : (heights[0] != null ? heights[0] : 10)) * scale / 2;
+              const dx = (mx - cx) / Math.max(1, rw), dy = (my - cy) / Math.max(1, rh);
+              if (dx * dx + dy * dy <= 1.2)
+                return { collectionLabel: collLabel,
+                         markerLabel: perLabels ? String(perLabels[i] ?? '') : null,
+                         x: cx, y: cy };
+            }
+
+          } else if (type === 'lines') {
+            const segs = ms.segments || [];
+            for (let i = 0; i < segs.length; i++) {
+              const [x1, y1] = _imgToCanvas(segs[i][0][0], segs[i][0][1]);
+              const [x2, y2] = _imgToCanvas(segs[i][1][0], segs[i][1][1]);
+              // point-to-segment distance
+              const len2 = (x2-x1)**2 + (y2-y1)**2;
+              let t = len2 > 0 ? Math.max(0, Math.min(1, ((mx-x1)*(x2-x1)+(my-y1)*(y2-y1)) / len2)) : 0;
+              const px = x1 + t*(x2-x1), py = y1 + t*(y2-y1);
+              if (Math.sqrt((mx-px)**2 + (my-py)**2) <= MARKER_HIT)
+                return { collectionLabel: collLabel,
+                         markerLabel: perLabels ? String(perLabels[i] ?? '') : null,
+                         x: (x1+x2)/2, y: (y1+y2)/2 };
+            }
+
+          } else if (type === 'rectangles' || type === 'squares') {
+            const offsets = ms.offsets || [];
+            const widths  = ms.widths  || [];
+            const heights = type === 'rectangles' ? (ms.heights || []) : widths;
+            for (let i = 0; i < offsets.length; i++) {
+              const [cx, cy] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              const hw = (widths[i]  != null ? widths[i]  : (widths[0]  != null ? widths[0]  : 20)) * scale / 2;
+              const hh = (heights[i] != null ? heights[i] : (heights[0] != null ? heights[0] : 20)) * scale / 2;
+              if (Math.abs(mx - cx) <= hw + MARKER_HIT && Math.abs(my - cy) <= hh + MARKER_HIT)
+                return { collectionLabel: collLabel,
+                         markerLabel: perLabels ? String(perLabels[i] ?? '') : null,
+                         x: cx, y: cy };
+            }
+
+          } else if (type === 'texts') {
+            const offsets = ms.offsets || [], texts = ms.texts || [];
+            for (let i = 0; i < offsets.length; i++) {
+              const [cx, cy] = _imgToCanvas(offsets[i][0], offsets[i][1]);
+              if (Math.abs(mx - cx) <= MARKER_HIT * 2 && Math.abs(my - cy) <= MARKER_HIT * 2)
+                return { collectionLabel: collLabel,
+                         markerLabel: perLabels ? String(perLabels[i] ?? '') : (texts[i] != null ? String(texts[i]) : null),
+                         x: cx, y: cy };
+            }
+          }
+        }
+        return null;
+      }
+
+      function _showTooltip(text, clientX, clientY) {
+        markerTooltip.textContent = text;
+        markerTooltip.style.display = 'block';
+        // Position just above-right of cursor, flip if near edge
+        const tw = markerTooltip.offsetWidth  || 160;
+        const th = markerTooltip.offsetHeight || 28;
+        const vw = window.innerWidth, vh = window.innerHeight;
+        let lx = clientX + 14, ly = clientY - th - 8;
+        if (lx + tw > vw - 8) lx = clientX - tw - 14;
+        if (ly < 8)            ly = clientY + 18;
+        markerTooltip.style.left = lx + 'px';
+        markerTooltip.style.top  = ly + 'px';
+      }
+
+      imageCanvas.addEventListener('mousemove', (e) => {
+        if (ovDrag || isPanning || isResizing) {
+          markerTooltip.style.display = 'none';
+          return;
+        }
+        const rect = imageCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+        // Overlay widget cursor first
+        const hit = _hitTest(e.clientX, e.clientY);
+        if (hit) {
+          imageCanvas.style.cursor = hit.mode === 'resize' ? 'nwse-resize' : 'move';
+          markerTooltip.style.display = 'none';
+          return;
+        }
+        imageCanvas.style.cursor = 'default';
+
+        // Marker hover tooltip
+        const mhit = _markerHitTest(mx, my);
+        if (mhit) {
+          const parts = [];
+          if (mhit.collectionLabel) parts.push(mhit.collectionLabel);
+          if (mhit.markerLabel)     parts.push(mhit.markerLabel);
+          if (parts.length > 0) {
+            _showTooltip(parts.join('\n'), e.clientX, e.clientY);
+            return;
+          }
+        }
+        markerTooltip.style.display = 'none';
+      });
+
+      imageCanvas.addEventListener('mouseleave', () => {
+        markerTooltip.style.display = 'none';
       });
 
       // ── model listeners ────────────────────────────────────────────────────
       model.on('change:image_bytes',       drawImage);
-      model.on('change:histogram_data',    drawHistogram);
+      model.on('change:histogram_data',    () => { drawImage(); drawHistogram(); });
       model.on('change:log_scale',         drawHistogram);
+      model.on('change:scale_mode',        () => { drawImage(); drawHistogram(); });
+      model.on('change:display_min',       () => { drawImage(); drawHistogram(); });
+      model.on('change:display_max',       () => { drawImage(); drawHistogram(); });
       model.on('change:show_colorbar',     drawHistogram);
       model.on('change:x_axis_json',       () => { if (!model.get('use_scalebar')) drawAxes(); });
       model.on('change:y_axis_json',       () => { if (!model.get('use_scalebar')) drawAxes(); });
@@ -898,8 +1477,17 @@ class Viewer2D(anywidget.AnyWidget):
         container.style.gap = model.get('histogram_visible') ? model.get('gap') + 'px' : '0px';
         drawHistogram();
       });
-      model.on('change:viewer_width',  () => { syncCanvasSizes(); drawImage(); drawScaleBar(); });
-      model.on('change:viewer_height', () => { syncCanvasSizes(); drawImage(); drawHistogram(); });
+      model.on('change:viewer_width change:viewer_height', () => {
+        if (_suppressSyncResize) return;
+        // Both traits must match before we resize — debounce so if width and
+        // height fire in the same tick we only run once with both settled.
+        const w = model.get('viewer_width');
+        const h = model.get('viewer_height');
+        const curW = parseInt(imageCanvas.style.width)  || 0;
+        const curH = parseInt(imageCanvas.style.height) || 0;
+        if (curW === w && curH === h) return;
+        syncCanvasSizes(); drawImage(); drawHistogram();
+      });
       model.on('change:zoom', () => {
         const z = model.get('zoom');
         zoomDisplay.textContent = z.toFixed(2) + 'x';
@@ -924,19 +1512,28 @@ class Viewer2D(anywidget.AnyWidget):
     """
 
     # ------------------------------------------------------------------ Python
-    def __init__(self, data: np.ndarray, x_axis=None, y_axis=None, units: str = "px"):
-        """Create a Viewer2D widget.
+    def __init__(
+        self,
+        data: np.ndarray,
+        x_axis: np.ndarray | None = None,
+        y_axis: np.ndarray | None = None,
+        units: str = "px",
+    ) -> None:
+        """Initialise the viewer with a 2-D image array.
 
         Parameters
         ----------
-        data : np.ndarray
-            2-D grayscale image (H × W), or 3-D (H × W × 3/4).
-        x_axis : array-like, optional
-            Physical coordinates for each column.
-        y_axis : array-like, optional
-            Physical coordinates for each row.
-        units : str, optional
-            Physical unit label (default ``'px'``).
+        data :
+            Grayscale image of shape ``(H, W)``.  A 3-D array ``(H, W, C)``
+            is accepted; only the first channel is used.
+        x_axis :
+            Physical coordinates for each column (length ``W``).
+            Defaults to ``np.arange(W)``.
+        y_axis :
+            Physical coordinates for each row (length ``H``).
+            Defaults to ``np.arange(H)``.
+        units :
+            Unit label shown on the scale bar / axes (default ``'px'``).
         """
         super().__init__()
 
@@ -996,10 +1593,17 @@ class Viewer2D(anywidget.AnyWidget):
             self.histogram_data = histogram_json
             self.hist_min = float(vmin)
             self.hist_max = float(vmax)
+            self.display_min = float(vmin)
+            self.display_max = float(vmax)
+            self.scale_mode = "linear"
 
     # ------------------------------------------------------------------
     def _to_png_bytes(self) -> bytes:
-        """Render current image as PNG (PyCharm static fallback)."""
+        """Render the current image as a PNG byte string.
+
+        Used as a static fallback in environments that do not run the full
+        anywidget JavaScript runtime (e.g. PyCharm's notebook preview).
+        """
         from PIL import Image as _PILImage
 
         arr = np.frombuffer(self.image_bytes, dtype=np.uint8).reshape(
@@ -1010,11 +1614,9 @@ class Viewer2D(anywidget.AnyWidget):
         img.save(buf, format="PNG")
         return buf.getvalue()
 
-    def _repr_mimebundle_(self, **kwargs):
-        """Return anywidget bundle + PNG fallback for PyCharm."""
-        bundle = super()._repr_mimebundle_(**kwargs)
-        if bundle is None:
-            bundle = {}
+    def _repr_mimebundle_(self, **kwargs: object) -> dict:
+        """Return the anywidget MIME bundle plus a ``image/png`` fallback."""
+        bundle: dict = super()._repr_mimebundle_(**kwargs) or {}
         try:
             bundle["image/png"] = base64.b64encode(self._to_png_bytes()).decode("ascii")
         except Exception:
@@ -1023,9 +1625,32 @@ class Viewer2D(anywidget.AnyWidget):
 
     # ------------------------------------------------------------------
     def update(
-        self, data: np.ndarray, x_axis=None, y_axis=None, units: str | None = None
-    ):
-        """Update the viewer with new data."""
+        self,
+        data: np.ndarray,
+        x_axis: np.ndarray | None = None,
+        y_axis: np.ndarray | None = None,
+        units: str | None = None,
+    ) -> None:
+        """Replace the displayed image with new data.
+
+        Existing zoom / pan state is preserved.  Marker overlays and overlay
+        widgets are *not* cleared — call :meth:`clear_markers` or
+        :meth:`clear_widgets` explicitly if needed.
+
+        Parameters
+        ----------
+        data :
+            New 2-D (or 3-D) image array.
+        x_axis :
+            Column coordinates (length ``W``).  Re-uses the previous axis if
+            ``None`` and the shape is unchanged; falls back to
+            ``np.arange(W)`` otherwise.
+        y_axis :
+            Row coordinates (length ``H``).  Same fallback logic as
+            *x_axis*.
+        units :
+            Unit label.  Unchanged if ``None``.
+        """
         data = np.asarray(data)
         if data.ndim == 3:
             data = data[:, :, 0]
@@ -1077,70 +1702,362 @@ class Viewer2D(anywidget.AnyWidget):
             self.histogram_data = histogram_json
             self.hist_min = float(vmin)
             self.hist_max = float(vmax)
+            self.display_min = float(vmin)
+            self.display_max = float(vmax)
             if units is not None:
                 self.units = units
 
     # ------------------------------------------------------------------
-    def add_widget(self, kind: str, color: str = "#00e5ff", **kwargs) -> str:
+    def set_clim(
+        self,
+        vmin: float | None = None,
+        vmax: float | None = None,
+    ) -> None:
+        """Set the display contrast limits (colour window).
+
+        Values outside ``[vmin, vmax]`` are clipped to black or white.
+        Both limits must lie within the data range ``[hist_min, hist_max]``.
+
+        Parameters
+        ----------
+        vmin :
+            Lower display bound.  Defaults to the current ``display_min``.
+        vmax :
+            Upper display bound.  Defaults to the current ``display_max``.
+
+        Raises
+        ------
+        ValueError
+            If ``vmin >= vmax``.
+
+        Examples
+        --------
+        >>> v.set_clim(0.1, 0.9)   # show only the central 80 % of the range
+        >>> v.set_clim(vmax=0.5)   # lower the ceiling without changing the floor
+        """
+        new_min = float(vmin) if vmin is not None else self.display_min
+        new_max = float(vmax) if vmax is not None else self.display_max
+        if new_min >= new_max:
+            raise ValueError(f"vmin ({new_min}) must be less than vmax ({new_max})")
+        with self.hold_trait_notifications():
+            self.display_min = new_min
+            self.display_max = new_max
+
+    def set_scale_mode(self, mode: str) -> None:
+        """Set the intensity mapping scale mode.
+
+        Parameters
+        ----------
+        mode :
+            One of:
+
+            * ``'linear'`` – uniform linear mapping (default).
+            * ``'log'``    – base-10 logarithmic mapping.  Values ≤ 0 are
+              clamped to a small positive epsilon.
+            * ``'symlog'`` – symmetric-log: linear near zero (within 1 % of
+              the display range), logarithmic outside.  Handles negative
+              values and zero correctly.
+
+        Raises
+        ------
+        ValueError
+            If *mode* is not one of the supported values.
+
+        Notes
+        -----
+        The keyboard shortcuts ``l`` (log) and ``s`` (symlog) toggle the same
+        mode interactively from within the viewer canvas.  Press the same key
+        again to return to ``'linear'``.
+        """
+        valid = ("linear", "log", "symlog")
+        if mode not in valid:
+            raise ValueError(f"mode must be one of {valid}, got {mode!r}")
+        self.scale_mode = mode
+
+    def add_widget(self, kind: str, color: str = "#00e5ff", **kwargs: object) -> str:
         """Add a moveable, resizable overlay widget to the viewer.
 
         Parameters
         ----------
-        kind : ``'circle'`` or ``'rectangle'``
-        color : str, optional
-            CSS colour (default cyan ``'#00e5ff'``).
+        kind :
+            One of ``'circle'``, ``'rectangle'``, ``'annular'``,
+            ``'polygon'``, or ``'label'``.
+        color :
+            CSS color string (default cyan ``'#00e5ff'``).
         **kwargs
-            circle     – ``cx``, ``cy`` (image px centre), ``r`` (radius).
-            rectangle  – ``x``, ``y`` (top-left, image px), ``w``, ``h``.
+            Shape-specific keyword arguments:
+
+            * **circle** – ``cx``, ``cy`` (center, image px), ``r`` (radius).
+            * **rectangle** – ``x``, ``y`` (top-left, image px), ``w``, ``h``.
+            * **annular** – ``cx``, ``cy``, ``r_outer``, ``r_inner``.
+            * **polygon** – ``vertices`` — list of ``[x, y]`` image-px points
+              (minimum 3).
+            * **label** – ``x``, ``y``, ``text``, ``fontsize``.
 
         Returns
         -------
-        str  Widget ID (pass to :meth:`remove_widget` / :meth:`get_widget`).
-        """
-        import uuid
+        str
+            Unique widget ID.  Pass to :meth:`get_widget`, :meth:`remove_widget`,
+            or :meth:`set_polygon_vertices`.
 
+        Raises
+        ------
+        ValueError
+            If *kind* is unrecognized, or if a polygon has fewer than 3
+            vertices, or if ``r_inner >= r_outer`` for an annular widget.
+        """
         kind = kind.lower()
-        if kind not in ("circle", "rectangle"):
-            raise ValueError(f"kind must be 'circle' or 'rectangle', got {kind!r}")
+        valid = ("circle", "rectangle", "annular", "polygon", "label")
+        if kind not in valid:
+            raise ValueError(f"kind must be one of {valid}, got {kind!r}")
         iw, ih = self.image_width, self.image_height
-        wid = str(uuid.uuid4())[:8]
+        wid = str(_uuid.uuid4())[:8]
+
+        def _f(key: str, default: float) -> float:
+            return float(kwargs.get(key, default))  # type: ignore[arg-type]
+
+        def _i(key: str, default: int) -> int:
+            return int(kwargs.get(key, default))  # type: ignore[arg-type]
+
         if kind == "circle":
-            entry = {
-                "id": wid,
-                "type": "circle",
-                "cx": float(kwargs.get("cx", iw / 2)),
-                "cy": float(kwargs.get("cy", ih / 2)),
-                "r": float(kwargs.get("r", iw * 0.1)),
+            entry: dict = {
+                "id": wid, "type": "circle",
+                "cx": _f("cx", iw / 2),
+                "cy": _f("cy", ih / 2),
+                "r":  _f("r",  iw * 0.1),
                 "color": color,
             }
-        else:
+        elif kind == "rectangle":
             entry = {
-                "id": wid,
-                "type": "rectangle",
-                "x": float(kwargs.get("x", iw * 0.25)),
-                "y": float(kwargs.get("y", ih * 0.25)),
-                "w": float(kwargs.get("w", iw * 0.5)),
-                "h": float(kwargs.get("h", ih * 0.5)),
+                "id": wid, "type": "rectangle",
+                "x": _f("x", iw * 0.25),
+                "y": _f("y", ih * 0.25),
+                "w": _f("w", iw * 0.5),
+                "h": _f("h", ih * 0.5),
                 "color": color,
             }
+        elif kind == "annular":
+            r_outer = _f("r_outer", iw * 0.2)
+            r_inner = _f("r_inner", iw * 0.1)
+            if r_inner >= r_outer:
+                raise ValueError("r_inner must be less than r_outer")
+            entry = {
+                "id": wid, "type": "annular",
+                "cx":      _f("cx", iw / 2),
+                "cy":      _f("cy", ih / 2),
+                "r_outer": r_outer,
+                "r_inner": r_inner,
+                "color":   color,
+            }
+        elif kind == "polygon":
+            raw_verts = kwargs.get("vertices", [
+                [iw * 0.25, ih * 0.25],
+                [iw * 0.75, ih * 0.25],
+                [iw * 0.75, ih * 0.75],
+                [iw * 0.25, ih * 0.75],
+            ])
+            verts = [[float(x), float(y)] for x, y in raw_verts]  # type: ignore[union-attr]
+            if len(verts) < 3:
+                raise ValueError("polygon needs at least 3 vertices")
+            entry = {
+                "id": wid, "type": "polygon",
+                "vertices": verts,
+                "color": color,
+            }
+        else:  # label
+            entry = {
+                "id":       wid,
+                "type":     "label",
+                "x":        _f("x", iw * 0.1),
+                "y":        _f("y", ih * 0.1),
+                "text":     str(kwargs.get("text", "Label")),
+                "fontsize": _i("fontsize", 14),
+                "color":    color,
+            }
+
         widgets = json.loads(self.overlay_widgets)
         widgets.append(entry)
         self.overlay_widgets = json.dumps(widgets)
         return wid
 
+    # ------------------------------------------------------------------
+    def add_annular_widget(
+        self,
+        cx: float | None = None,
+        cy: float | None = None,
+        r_outer: float | None = None,
+        r_inner: float | None = None,
+        color: str = "#00e5ff",
+    ) -> str:
+        """Add an annular (ring) overlay widget.
+
+        Mirrors :class:`~hyperspy.drawing._widgets.circle.CircleWidget` with
+        both an outer and an inner radius.
+
+        Parameters
+        ----------
+        cx, cy :
+            Centre position in image-pixel units.
+            Defaults to the image centre.
+        r_outer :
+            Outer radius in image-pixel units (default 20 % of image width).
+        r_inner :
+            Inner radius in image-pixel units (default 10 % of image width).
+            Must be strictly less than *r_outer*.
+        color :
+            CSS colour string.
+
+        Returns
+        -------
+        str
+            Widget ID.
+        """
+        return self.add_widget(
+            "annular",
+            color=color,
+            cx=cx if cx is not None else self.image_width / 2,
+            cy=cy if cy is not None else self.image_height / 2,
+            r_outer=r_outer if r_outer is not None else self.image_width * 0.2,
+            r_inner=r_inner if r_inner is not None else self.image_width * 0.1,
+        )
+
+    def add_polygon_widget(
+        self,
+        vertices: list[list[float]] | None = None,
+        color: str = "#00e5ff",
+    ) -> str:
+        """Add a polygon overlay widget.
+
+        Mirrors :class:`~hyperspy.drawing._widgets.polygon.PolygonWidget`.
+        Every vertex is represented by a drag handle; dragging inside the
+        polygon moves the whole shape.
+
+        Parameters
+        ----------
+        vertices :
+            ``[[x, y], ...]`` vertex positions in image-pixel units.
+            Must contain at least 3 points.
+            Defaults to a centred square covering 50 % of the image.
+        color :
+            CSS colour string.
+
+        Returns
+        -------
+        str
+            Widget ID.
+        """
+        kwargs: dict = {} if vertices is None else {"vertices": vertices}
+        return self.add_widget("polygon", color=color, **kwargs)
+
+    def set_polygon_vertices(self, wid: str, vertices: list[list[float]]) -> None:
+        """Replace the vertices of an existing polygon widget in-place.
+
+        Parameters
+        ----------
+        wid :
+            Widget ID returned by :meth:`add_polygon_widget`.
+        vertices :
+            New ``[[x, y], ...]`` vertex list in image-pixel units.
+            Must contain at least 3 points.
+
+        Raises
+        ------
+        ValueError
+            If fewer than 3 vertices are supplied.
+        KeyError
+            If *wid* does not correspond to a known widget.
+        """
+        verts = [[float(x), float(y)] for x, y in vertices]
+        if len(verts) < 3:
+            raise ValueError("polygon needs at least 3 vertices")
+        widgets = json.loads(self.overlay_widgets)
+        for w in widgets:
+            if w["id"] == wid:
+                w["vertices"] = verts
+                self.overlay_widgets = json.dumps(widgets)
+                return
+        raise KeyError(f"No widget with id {wid!r}")
+
+    def add_label_widget(
+        self,
+        text: str = "Label",
+        x: float | None = None,
+        y: float | None = None,
+        fontsize: int = 14,
+        color: str = "#00e5ff",
+    ) -> str:
+        """Add a draggable text label overlay widget.
+
+        Mirrors :class:`~hyperspy.drawing._widgets.label.LabelWidget`.
+
+        Parameters
+        ----------
+        text :
+            Displayed string (default ``'Label'``).
+        x, y :
+            Anchor position in image-pixel units.
+            Defaults to the top-left area of the image.
+        fontsize :
+            Font size in CSS pixels (default ``14``).
+        color :
+            CSS colour string.
+
+        Returns
+        -------
+        str
+            Widget ID.
+        """
+        return self.add_widget(
+            "label",
+            color=color,
+            x=x if x is not None else self.image_width * 0.1,
+            y=y if y is not None else self.image_height * 0.1,
+            text=text,
+            fontsize=fontsize,
+        )
+
     def remove_widget(self, wid: str) -> None:
-        """Remove overlay widget by ID."""
-        widgets = [w for w in json.loads(self.overlay_widgets) if w["id"] != wid]
-        self.overlay_widgets = json.dumps(widgets)
+        """Remove an overlay widget by ID.
+
+        Parameters
+        ----------
+        wid :
+            Widget ID returned by any ``add_*_widget`` call.
+
+        Raises
+        ------
+        KeyError
+            If *wid* does not correspond to a known widget.
+        """
+        widgets = json.loads(self.overlay_widgets)
+        new_widgets = [w for w in widgets if w["id"] != wid]
+        if len(new_widgets) == len(widgets):
+            raise KeyError(f"No overlay widget with id {wid!r}")
+        self.overlay_widgets = json.dumps(new_widgets)
 
     def clear_widgets(self) -> None:
         """Remove all overlay widgets."""
         self.overlay_widgets = "[]"
 
     def get_widget(self, wid: str) -> dict:
-        """Return current state of a widget as a dict (position/size in image px).
+        """Return the current state of an overlay widget as a plain dict.
 
-        Raises ``KeyError`` if *wid* does not exist.
+        All position and size values are in image-pixel units.
+
+        Parameters
+        ----------
+        wid :
+            Widget ID returned by any ``add_*_widget`` call.
+
+        Returns
+        -------
+        dict
+            A copy of the widget's internal state dictionary.
+
+        Raises
+        ------
+        KeyError
+            If *wid* does not correspond to a known widget.
         """
         for w in json.loads(self.overlay_widgets):
             if w["id"] == wid:
@@ -1148,38 +2065,151 @@ class Viewer2D(anywidget.AnyWidget):
         raise KeyError(f"No overlay widget with id {wid!r}")
 
     # ================================================================== markers
-    # Low-level helper
-    # -----------------------------------------------------------------
-    def _push_markers(self, ms: dict, replace: bool) -> None:
-        """Append or replace the markers_json list."""
-        if replace:
-            self.markers_json = json.dumps([ms])
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _new_marker_id(self) -> str:
+        """Return a new short unique marker-set ID."""
+        return str(_uuid.uuid4())[:8]
+
+    def _write_marker(self, ms: dict, marker_id: str | None) -> str:
+        """Insert or replace a marker set by ID.
+
+        Parameters
+        ----------
+        ms :
+            Marker-set dict (without ``"id"``; this method fills it in).
+            May contain optional ``"label"`` and/or ``"labels"`` fields.
+        marker_id :
+            If ``None``, generate a new ID and append the set.
+            If given, replace the matching set in-place; append if not found.
+
+        Returns
+        -------
+        str
+            The final marker ID (new or supplied).
+        """
+        sets = json.loads(self.markers_json)
+        if marker_id is None:
+            marker_id = self._new_marker_id()
+            ms["id"] = marker_id
+            sets.append(ms)
         else:
-            existing = json.loads(self.markers_json)
-            existing.append(ms)
-            self.markers_json = json.dumps(existing)
+            ms["id"] = marker_id
+            for i, s in enumerate(sets):
+                if s.get("id") == marker_id:
+                    sets[i] = ms
+                    break
+            else:
+                sets.append(ms)
+        self.markers_json = json.dumps(sets)
+        return marker_id
 
     @staticmethod
-    def _broadcast_1d(arr, n: int, name: str) -> list:
-        arr = np.asarray(arr, dtype=float)
-        if arr.ndim == 0:
-            return np.full(n, float(arr)).tolist()
-        if arr.ndim != 1 or len(arr) != n:
+    def _broadcast_1d(arr: object, n: int, name: str) -> list[float]:
+        """Broadcast *arr* to a flat Python list of length *n*.
+
+        A scalar value is repeated *n* times.  A 1-D array must already have
+        exactly *n* elements.
+
+        Parameters
+        ----------
+        arr :
+            Scalar or 1-D array-like of numeric values.
+        n :
+            Required length.
+        name :
+            Parameter name used in error messages.
+
+        Returns
+        -------
+        list of float
+
+        Raises
+        ------
+        ValueError
+            If *arr* is 1-D but has the wrong length.
+        """
+        a = np.asarray(arr, dtype=float)
+        if a.ndim == 0:
+            return np.full(n, float(a)).tolist()
+        if a.ndim != 1 or len(a) != n:
             raise ValueError(f"'{name}' must be a scalar or 1-D array of length {n}")
-        return arr.tolist()
+        return a.tolist()
 
     @staticmethod
-    def _check_offsets(offsets) -> np.ndarray:
-        offsets = np.asarray(offsets, dtype=float)
-        if offsets.ndim == 1 and offsets.shape[0] == 2:
-            offsets = offsets[np.newaxis, :]
-        if offsets.ndim != 2 or offsets.shape[1] != 2:
-            raise ValueError("offsets must be shape (N, 2)")
-        return offsets
+    def _check_offsets(offsets: object) -> np.ndarray:
+        """Validate and normalise *offsets* to shape ``(N, 2)``.
 
-    # -----------------------------------------------------------------
-    def set_circles(self, offsets, sizes, color="#ff0000", linewidth=1.5) -> None:
-        """Set circle markers (replaces all existing markers).
+        A single ``[x, y]`` pair (shape ``(2,)``) is promoted to ``(1, 2)``.
+
+        Parameters
+        ----------
+        offsets :
+            Array-like of shape ``(N, 2)`` or ``(2,)``.
+
+        Returns
+        -------
+        np.ndarray of shape (N, 2)
+
+        Raises
+        ------
+        ValueError
+            If the shape is not compatible with ``(N, 2)``.
+        """
+        arr = np.asarray(offsets, dtype=float)
+        if arr.ndim == 1 and arr.shape[0] == 2:
+            arr = arr[np.newaxis, :]
+        if arr.ndim != 2 or arr.shape[1] != 2:
+            raise ValueError("offsets must be shape (N, 2)")
+        return arr
+
+    @staticmethod
+    def _opt_labels(
+        label: str | None,
+        labels: list[str] | None,
+        n: int,
+    ) -> dict:
+        """Build the optional ``label`` / ``labels`` sub-dict for a marker set.
+
+        Parameters
+        ----------
+        label :
+            Collection-level hover tooltip, or ``None``.
+        labels :
+            Per-marker hover tooltips (length must equal *n*), or ``None``.
+        n :
+            Number of markers in the set.
+
+        Returns
+        -------
+        dict
+            Empty dict, ``{"label": …}``, ``{"labels": […]}``, or both.
+
+        Raises
+        ------
+        ValueError
+            If *labels* is supplied but has a length other than *n*.
+        """
+        extra: dict = {}
+        if label is not None:
+            extra["label"] = str(label)
+        if labels is not None:
+            ls = list(labels)
+            if len(ls) != n:
+                raise ValueError(
+                    f"len(labels) must equal the number of markers ({n}), "
+                    f"got {len(ls)}"
+                )
+            extra["labels"] = [str(l) for l in ls]
+        return extra
+
+    # ------------------------------------------------------------------
+    # Circles
+    # ------------------------------------------------------------------
+    def add_circles(self, offsets, sizes, color="#ff0000", linewidth=1.5,
+                    marker_id=None, label=None, labels=None) -> str:
+        """Add or replace a set of circle markers.
 
         Mirrors :class:`~hyperspy.drawing._markers.circles.Circles`.
 
@@ -1191,72 +2221,93 @@ class Viewer2D(anywidget.AnyWidget):
             Radius of each circle in image-pixel units.
         color : str, optional  CSS colour (default ``'#ff0000'``).
         linewidth : float, optional  Stroke width in canvas pixels.
+        marker_id : str, optional
+            Replace an existing set if supplied; otherwise append a new one.
+        label : str, optional
+            Tooltip shown when hovering anywhere over this collection.
+        labels : list of str, optional
+            Per-marker tooltip, one entry per offset.
+
+        Returns
+        -------
+        str  Marker ID.
         """
         offsets = self._check_offsets(offsets)
         n = len(offsets)
         ms = {"type": "circles", "offsets": offsets.tolist(),
               "sizes": self._broadcast_1d(sizes, n, "sizes"),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=True)
+              "color": color, "linewidth": linewidth,
+              **self._opt_labels(label, labels, n)}
+        return self._write_marker(ms, marker_id)
 
-    def add_circles(self, offsets, sizes, color="#ff0000", linewidth=1.5) -> None:
-        """Add circle markers on top of existing markers.  Same parameters as
-        :meth:`set_circles`."""
-        offsets = self._check_offsets(offsets)
-        n = len(offsets)
-        ms = {"type": "circles", "offsets": offsets.tolist(),
-              "sizes": self._broadcast_1d(sizes, n, "sizes"),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=False)
+    def set_circles(self, offsets, sizes, color="#ff0000", linewidth=1.5,
+                    marker_id=None, label=None, labels=None) -> str:
+        """Alias for :meth:`add_circles`."""
+        return self.add_circles(offsets, sizes, color=color, linewidth=linewidth,
+                                marker_id=marker_id, label=label, labels=labels)
 
-    # -----------------------------------------------------------------
-    def set_arrows(self, offsets, U, V, color="#ff0000", linewidth=1.5) -> None:
-        """Set arrow markers (replaces all existing markers).
+    # ------------------------------------------------------------------
+    # Arrows
+    # ------------------------------------------------------------------
+    def add_arrows(self, offsets, U, V, color="#ff0000", linewidth=1.5,
+                   marker_id=None, label=None, labels=None) -> str:
+        """Add or replace a set of arrow markers.
 
         Mirrors :class:`~hyperspy.drawing._markers.arrows.Arrows`.
 
         Parameters
         ----------
-        offsets : array-like (N, 2)   Arrow tail positions ``[[x, y], ...]``.
-        U : array-like or scalar      Horizontal component (image-pixel units).
-        V : array-like or scalar      Vertical component (image-pixel units).
+        offsets : array-like (N, 2)  Arrow tail positions.
+        U, V : array-like or scalar  Horizontal / vertical components (image px).
         color : str, optional
         linewidth : float, optional
+        marker_id : str, optional  Replace existing set if given.
+        label : str, optional      Collection hover tooltip.
+        labels : list of str, optional  Per-arrow hover tooltips.
+
+        Returns
+        -------
+        str  Marker ID.
         """
         offsets = self._check_offsets(offsets)
         n = len(offsets)
         ms = {"type": "arrows", "offsets": offsets.tolist(),
               "U": self._broadcast_1d(U, n, "U"),
               "V": self._broadcast_1d(V, n, "V"),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=True)
+              "color": color, "linewidth": linewidth,
+              **self._opt_labels(label, labels, n)}
+        return self._write_marker(ms, marker_id)
 
-    def add_arrows(self, offsets, U, V, color="#ff0000", linewidth=1.5) -> None:
-        """Add arrow markers on top of existing markers.  Same parameters as
-        :meth:`set_arrows`."""
-        offsets = self._check_offsets(offsets)
-        n = len(offsets)
-        ms = {"type": "arrows", "offsets": offsets.tolist(),
-              "U": self._broadcast_1d(U, n, "U"),
-              "V": self._broadcast_1d(V, n, "V"),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=False)
+    def set_arrows(self, offsets, U, V, color="#ff0000", linewidth=1.5,
+                   marker_id=None, label=None, labels=None) -> str:
+        """Alias for :meth:`add_arrows`."""
+        return self.add_arrows(offsets, U, V, color=color, linewidth=linewidth,
+                               marker_id=marker_id, label=label, labels=labels)
 
-    # -----------------------------------------------------------------
-    def set_ellipses(self, offsets, widths, heights, angles=0,
-                     color="#ff0000", linewidth=1.5) -> None:
-        """Set ellipse markers (replaces all existing markers).
+    # ------------------------------------------------------------------
+    # Ellipses
+    # ------------------------------------------------------------------
+    def add_ellipses(self, offsets, widths, heights, angles=0,
+                     color="#ff0000", linewidth=1.5,
+                     marker_id=None, label=None, labels=None) -> str:
+        """Add or replace a set of ellipse markers.
 
         Mirrors :class:`~hyperspy.drawing._markers.ellipses.Ellipses`.
 
         Parameters
         ----------
-        offsets : array-like (N, 2)   Centre positions ``[[x, y], ...]``.
-        widths : array-like or scalar  Full width in image-pixel units.
-        heights : array-like or scalar Full height in image-pixel units.
-        angles : array-like or scalar  Rotation angle in degrees (default 0).
+        offsets : array-like (N, 2)
+        widths, heights : array-like or scalar  Full extents in image px.
+        angles : array-like or scalar           Rotation in degrees.
         color : str, optional
         linewidth : float, optional
+        marker_id : str, optional
+        label : str, optional
+        labels : list of str, optional
+
+        Returns
+        -------
+        str  Marker ID.
         """
         offsets = self._check_offsets(offsets)
         n = len(offsets)
@@ -1264,69 +2315,79 @@ class Viewer2D(anywidget.AnyWidget):
               "widths":  self._broadcast_1d(widths,  n, "widths"),
               "heights": self._broadcast_1d(heights, n, "heights"),
               "angles":  self._broadcast_1d(angles,  n, "angles"),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=True)
+              "color": color, "linewidth": linewidth,
+              **self._opt_labels(label, labels, n)}
+        return self._write_marker(ms, marker_id)
 
-    def add_ellipses(self, offsets, widths, heights, angles=0,
-                     color="#ff0000", linewidth=1.5) -> None:
-        """Add ellipse markers on top of existing markers.  Same parameters as
-        :meth:`set_ellipses`."""
-        offsets = self._check_offsets(offsets)
-        n = len(offsets)
-        ms = {"type": "ellipses", "offsets": offsets.tolist(),
-              "widths":  self._broadcast_1d(widths,  n, "widths"),
-              "heights": self._broadcast_1d(heights, n, "heights"),
-              "angles":  self._broadcast_1d(angles,  n, "angles"),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=False)
+    def set_ellipses(self, offsets, widths, heights, angles=0,
+                     color="#ff0000", linewidth=1.5,
+                     marker_id=None, label=None, labels=None) -> str:
+        """Alias for :meth:`add_ellipses`."""
+        return self.add_ellipses(offsets, widths, heights, angles=angles,
+                                 color=color, linewidth=linewidth,
+                                 marker_id=marker_id, label=label, labels=labels)
 
-    # -----------------------------------------------------------------
-    def set_lines(self, segments, color="#ff0000", linewidth=1.5) -> None:
-        """Set line-segment markers (replaces all existing markers).
+    # ------------------------------------------------------------------
+    # Lines
+    # ------------------------------------------------------------------
+    def add_lines(self, segments, color="#ff0000", linewidth=1.5,
+                  marker_id=None, label=None, labels=None) -> str:
+        """Add or replace a set of line-segment markers.
 
         Mirrors :class:`~hyperspy.drawing._markers.lines.Lines`.
 
         Parameters
         ----------
-        segments : array-like (N, 2, 2)
-            ``[[[x1,y1],[x2,y2]], ...]`` in image-pixel space.
+        segments : array-like (N, 2, 2)  ``[[[x1,y1],[x2,y2]], ...]``.
         color : str, optional
         linewidth : float, optional
-        """
-        segments = np.asarray(segments, dtype=float)
-        if segments.ndim == 2 and segments.shape == (2, 2):
-            segments = segments[np.newaxis]           # single segment
-        if segments.ndim != 3 or segments.shape[1:] != (2, 2):
-            raise ValueError("segments must be shape (N, 2, 2)")
-        ms = {"type": "lines", "segments": segments.tolist(),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=True)
+        marker_id : str, optional
+        label : str, optional
+        labels : list of str, optional  One per segment.
 
-    def add_lines(self, segments, color="#ff0000", linewidth=1.5) -> None:
-        """Add line-segment markers on top of existing markers.  Same
-        parameters as :meth:`set_lines`."""
+        Returns
+        -------
+        str  Marker ID.
+        """
         segments = np.asarray(segments, dtype=float)
         if segments.ndim == 2 and segments.shape == (2, 2):
             segments = segments[np.newaxis]
         if segments.ndim != 3 or segments.shape[1:] != (2, 2):
             raise ValueError("segments must be shape (N, 2, 2)")
+        n = len(segments)
         ms = {"type": "lines", "segments": segments.tolist(),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=False)
+              "color": color, "linewidth": linewidth,
+              **self._opt_labels(label, labels, n)}
+        return self._write_marker(ms, marker_id)
 
-    # -----------------------------------------------------------------
-    def set_rectangles(self, offsets, widths, heights, angles=0,
-                       color="#ff0000", linewidth=1.5) -> None:
-        """Set rectangle markers (replaces all existing markers).
+    def set_lines(self, segments, color="#ff0000", linewidth=1.5,
+                  marker_id=None, label=None, labels=None) -> str:
+        """Alias for :meth:`add_lines`."""
+        return self.add_lines(segments, color=color, linewidth=linewidth,
+                              marker_id=marker_id, label=label, labels=labels)
+
+    # ------------------------------------------------------------------
+    # Rectangles
+    # ------------------------------------------------------------------
+    def add_rectangles(self, offsets, widths, heights, angles=0,
+                       color="#ff0000", linewidth=1.5,
+                       marker_id=None, label=None, labels=None) -> str:
+        """Add or replace a set of rectangle markers.
 
         Parameters
         ----------
-        offsets : array-like (N, 2)    Centre positions ``[[x, y], ...]``.
-        widths : array-like or scalar  Width in image-pixel units.
-        heights : array-like or scalar Height in image-pixel units.
-        angles : array-like or scalar  Rotation in degrees (default 0).
+        offsets : array-like (N, 2)
+        widths, heights : array-like or scalar
+        angles : array-like or scalar  Rotation in degrees.
         color : str, optional
         linewidth : float, optional
+        marker_id : str, optional
+        label : str, optional
+        labels : list of str, optional
+
+        Returns
+        -------
+        str  Marker ID.
         """
         offsets = self._check_offsets(offsets)
         n = len(offsets)
@@ -1334,100 +2395,194 @@ class Viewer2D(anywidget.AnyWidget):
               "widths":  self._broadcast_1d(widths,  n, "widths"),
               "heights": self._broadcast_1d(heights, n, "heights"),
               "angles":  self._broadcast_1d(angles,  n, "angles"),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=True)
+              "color": color, "linewidth": linewidth,
+              **self._opt_labels(label, labels, n)}
+        return self._write_marker(ms, marker_id)
 
-    def add_rectangles(self, offsets, widths, heights, angles=0,
-                       color="#ff0000", linewidth=1.5) -> None:
-        """Add rectangle markers on top of existing markers.  Same parameters
-        as :meth:`set_rectangles`."""
-        offsets = self._check_offsets(offsets)
-        n = len(offsets)
-        ms = {"type": "rectangles", "offsets": offsets.tolist(),
-              "widths":  self._broadcast_1d(widths,  n, "widths"),
-              "heights": self._broadcast_1d(heights, n, "heights"),
-              "angles":  self._broadcast_1d(angles,  n, "angles"),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=False)
+    def set_rectangles(self, offsets, widths, heights, angles=0,
+                       color="#ff0000", linewidth=1.5,
+                       marker_id=None, label=None, labels=None) -> str:
+        """Alias for :meth:`add_rectangles`."""
+        return self.add_rectangles(offsets, widths, heights, angles=angles,
+                                   color=color, linewidth=linewidth,
+                                   marker_id=marker_id, label=label, labels=labels)
 
-    # -----------------------------------------------------------------
-    def set_squares(self, offsets, widths, angles=0,
-                    color="#ff0000", linewidth=1.5) -> None:
-        """Set square markers (replaces all existing markers).
+    # ------------------------------------------------------------------
+    # Squares
+    # ------------------------------------------------------------------
+    def add_squares(self, offsets, widths, angles=0,
+                    color="#ff0000", linewidth=1.5,
+                    marker_id=None, label=None, labels=None) -> str:
+        """Add or replace a set of square markers.
 
         Mirrors :class:`~hyperspy.drawing._markers.squares.Squares`.
 
         Parameters
         ----------
-        offsets : array-like (N, 2)    Centre positions ``[[x, y], ...]``.
-        widths : array-like or scalar  Side length in image-pixel units.
-        angles : array-like or scalar  Rotation in degrees (default 0).
+        offsets : array-like (N, 2)
+        widths : array-like or scalar  Side length in image px.
+        angles : array-like or scalar  Rotation in degrees.
         color : str, optional
         linewidth : float, optional
+        marker_id : str, optional
+        label : str, optional
+        labels : list of str, optional
+
+        Returns
+        -------
+        str  Marker ID.
         """
         offsets = self._check_offsets(offsets)
         n = len(offsets)
         ms = {"type": "squares", "offsets": offsets.tolist(),
               "widths": self._broadcast_1d(widths, n, "widths"),
               "angles": self._broadcast_1d(angles, n, "angles"),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=True)
+              "color": color, "linewidth": linewidth,
+              **self._opt_labels(label, labels, n)}
+        return self._write_marker(ms, marker_id)
 
-    def add_squares(self, offsets, widths, angles=0,
-                    color="#ff0000", linewidth=1.5) -> None:
-        """Add square markers on top of existing markers.  Same parameters as
-        :meth:`set_squares`."""
-        offsets = self._check_offsets(offsets)
-        n = len(offsets)
-        ms = {"type": "squares", "offsets": offsets.tolist(),
-              "widths": self._broadcast_1d(widths, n, "widths"),
-              "angles": self._broadcast_1d(angles, n, "angles"),
-              "color": color, "linewidth": linewidth}
-        self._push_markers(ms, replace=False)
+    def set_squares(self, offsets, widths, angles=0,
+                    color="#ff0000", linewidth=1.5,
+                    marker_id=None, label=None, labels=None) -> str:
+        """Alias for :meth:`add_squares`."""
+        return self.add_squares(offsets, widths, angles=angles,
+                                color=color, linewidth=linewidth,
+                                marker_id=marker_id, label=label, labels=labels)
 
-    # -----------------------------------------------------------------
-    def set_texts(self, offsets, texts, color="#ff0000", fontsize=12) -> None:
-        """Set text markers (replaces all existing markers).
+    # ------------------------------------------------------------------
+    # Texts
+    # ------------------------------------------------------------------
+    def add_texts(self, offsets, texts, color="#ff0000", fontsize=12,
+                  marker_id=None, label=None, labels=None) -> str:
+        """Add or replace a set of text markers.
 
         Mirrors :class:`~hyperspy.drawing._markers.texts.Texts`.
 
         Parameters
         ----------
-        offsets : array-like (N, 2)   Anchor positions ``[[x, y], ...]``.
-        texts : list of str           One label per position.
+        offsets : array-like (N, 2)
+        texts : list of str           Displayed text per position.
         color : str, optional
-        fontsize : int, optional      Font size in canvas pixels (default 12).
+        fontsize : int, optional
+        marker_id : str, optional
+        label : str, optional         Collection hover tooltip (distinct from displayed texts).
+        labels : list of str, optional  Per-marker hover tooltip; defaults to ``texts`` if omitted.
+
+        Returns
+        -------
+        str  Marker ID.
         """
         offsets = self._check_offsets(offsets)
         texts = list(texts)
-        if len(texts) != len(offsets):
+        n = len(offsets)
+        if len(texts) != n:
             raise ValueError("len(texts) must equal len(offsets)")
         ms = {"type": "texts", "offsets": offsets.tolist(),
-              "texts": texts, "color": color, "fontsize": fontsize}
-        self._push_markers(ms, replace=True)
+              "texts": texts, "color": color, "fontsize": fontsize,
+              **self._opt_labels(label, labels, n)}
+        return self._write_marker(ms, marker_id)
 
-    def add_texts(self, offsets, texts, color="#ff0000", fontsize=12) -> None:
-        """Add text markers on top of existing markers.  Same parameters as
-        :meth:`set_texts`."""
-        offsets = self._check_offsets(offsets)
-        texts = list(texts)
-        if len(texts) != len(offsets):
-            raise ValueError("len(texts) must equal len(offsets)")
-        ms = {"type": "texts", "offsets": offsets.tolist(),
-              "texts": texts, "color": color, "fontsize": fontsize}
-        self._push_markers(ms, replace=False)
+    def set_texts(self, offsets, texts, color="#ff0000", fontsize=12,
+                  marker_id=None, label=None, labels=None) -> str:
+        """Alias for :meth:`add_texts`."""
+        return self.add_texts(offsets, texts, color=color, fontsize=fontsize,
+                              marker_id=marker_id, label=label, labels=labels)
 
-    # -----------------------------------------------------------------
-    # Legacy aliases kept for back-compat with earlier set_markers call
-    def set_markers(self, offsets, sizes, color="#ff0000", linewidth=1.5) -> None:
-        """Alias for :meth:`set_circles` (kept for backwards compatibility)."""
-        self.set_circles(offsets, sizes, color=color, linewidth=linewidth)
+    # ------------------------------------------------------------------
+    # Legacy aliases
+    # ------------------------------------------------------------------
+    def set_markers(self, offsets, sizes, color="#ff0000", linewidth=1.5,
+                    marker_id=None, label=None, labels=None) -> str:
+        """Alias for :meth:`add_circles` (backwards compatibility)."""
+        return self.add_circles(offsets, sizes, color=color, linewidth=linewidth,
+                                marker_id=marker_id, label=label, labels=labels)
 
-    def add_markers(self, offsets, sizes, color="#ff0000", linewidth=1.5) -> None:
-        """Alias for :meth:`add_circles` (kept for backwards compatibility)."""
-        self.add_circles(offsets, sizes, color=color, linewidth=linewidth)
+    def add_markers(self, offsets, sizes, color="#ff0000", linewidth=1.5,
+                    marker_id=None, label=None, labels=None) -> str:
+        """Alias for :meth:`add_circles` (backwards compatibility)."""
+        return self.add_circles(offsets, sizes, color=color, linewidth=linewidth,
+                                marker_id=marker_id, label=label, labels=labels)
+
+    # ------------------------------------------------------------------
+    # Inspection / removal
+    # ------------------------------------------------------------------
+    def get_marker(self, marker_id: str) -> dict:
+        """Return a copy of the marker-set dict for *marker_id*.
+
+        Parameters
+        ----------
+        marker_id :
+            ID returned by any ``add_*`` / ``set_*`` call.
+
+        Returns
+        -------
+        dict
+            Current state of the marker set — includes ``type``, spatial
+            data, ``color``, ``id``, and optionally ``label`` / ``labels``.
+
+        Raises
+        ------
+        KeyError
+            If *marker_id* is not in the current marker list.
+        """
+        for ms in json.loads(self.markers_json):
+            if ms.get("id") == marker_id:
+                return dict(ms)
+        raise KeyError(f"No marker set with id {marker_id!r}")
+
+    def remove_marker(self, marker_id: str) -> None:
+        """Remove a single marker set by ID.
+
+        Parameters
+        ----------
+        marker_id :
+            ID returned by any ``add_*`` / ``set_*`` call.
+
+        Raises
+        ------
+        KeyError
+            If *marker_id* is not in the current marker list.
+        """
+        sets = json.loads(self.markers_json)
+        new_sets = [ms for ms in sets if ms.get("id") != marker_id]
+        if len(new_sets) == len(sets):
+            raise KeyError(f"No marker set with id {marker_id!r}")
+        self.markers_json = json.dumps(new_sets)
+
+    def list_markers(self) -> list[dict]:
+        """Return a summary of every current marker set.
+
+        Returns
+        -------
+        list of dict
+            Each entry contains:
+
+            * ``'id'`` – marker-set ID string.
+            * ``'type'`` – marker type (e.g. ``'circles'``).
+            * ``'color'`` – CSS colour string.
+            * ``'n'`` – number of individual marks / segments.
+            * ``'label'`` – collection tooltip (only present if set).
+            * ``'labels'`` – per-marker tooltips (only present if set).
+        """
+        out: list[dict] = []
+        for ms in json.loads(self.markers_json):
+            t = ms.get("type", "?")
+            n = len(ms.get("segments", [])) if t == "lines" else len(ms.get("offsets", []))
+            entry: dict = {
+                "id": ms.get("id"),
+                "type": t,
+                "color": ms.get("color"),
+                "n": n,
+            }
+            if "label"  in ms:
+                entry["label"]  = ms["label"]
+            if "labels" in ms:
+                entry["labels"] = ms["labels"]
+            out.append(entry)
+        return out
 
     def clear_markers(self) -> None:
         """Remove all marker overlays."""
         self.markers_json = "[]"
+
 
