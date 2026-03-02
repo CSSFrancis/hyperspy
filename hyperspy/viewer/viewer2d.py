@@ -213,13 +213,14 @@ class Viewer2D(anywidget.AnyWidget):
       scaleBar.appendChild(scaleBarLabel);
       canvasWrapper.appendChild(scaleBar);
 
-      // Zoom display
-      const zoomDisplay = document.createElement('div');
-      zoomDisplay.style.cssText =
-        'position:absolute;top:10px;left:10px;padding:8px 12px;font-size:13px;' +
-        'font-family:monospace;font-weight:bold;background:rgba(0,0,0,0.75);color:white;' +
-        'border-radius:4px;pointer-events:none;display:none;';
-      canvasWrapper.appendChild(zoomDisplay);
+      // Status overlay — x / y / value readout, top-right corner while hovering.
+      const statusBar = document.createElement('div');
+      statusBar.style.cssText =
+        'position:absolute;top:8px;right:8px;padding:2px 7px;' +
+        'background:rgba(0,0,0,0.55);color:white;font-size:10px;font-family:monospace;' +
+        'border-radius:4px;box-shadow:0 2px 4px rgba(0,0,0,0.4);pointer-events:none;' +
+        'white-space:nowrap;display:none;z-index:8;';
+      canvasWrapper.appendChild(statusBar);
 
       // Marker tooltip
       const markerTooltip = document.createElement('div');
@@ -255,6 +256,7 @@ class Viewer2D(anywidget.AnyWidget):
       outerContainer.appendChild(container);
       outerContainer.appendChild(resizeHandle);
       outerContainer.appendChild(sizeLabel);
+
       el.appendChild(outerContainer);
 
       // ── state ──────────────────────────────────────────────────────────────
@@ -324,67 +326,174 @@ class Viewer2D(anywidget.AnyWidget):
         return v.toFixed(2);
       }
 
+      // ── axis coordinate helpers (uniform & non-uniform) ───────────────────
+      /** True when all steps are within 0.1 % of the first step. */
+      function _axisIsUniform(arr) {
+        if (arr.length < 2) return true;
+        const step0 = arr[1] - arr[0];
+        if (step0 === 0) return false;
+        for (let i = 2; i < arr.length; i++) {
+          if (Math.abs((arr[i] - arr[i-1]) / step0 - 1) > 1e-3) return false;
+        }
+        return true;
+      }
+
+      /**
+       * Physical axis value → fractional image position [0, 1].
+       * Binary-search + linear interpolation — works for any spacing.
+       */
+      function _axisValToFrac(arr, val) {
+        if (arr.length < 2) return 0;
+        const n = arr.length;
+        const asc = arr[n-1] >= arr[0];
+        if (asc ? val <= arr[0]   : val >= arr[0])   return 0;
+        if (asc ? val >= arr[n-1] : val <= arr[n-1]) return 1;
+        let lo = 0, hi = n - 2;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          const inSeg = asc ? (arr[mid] <= val && val < arr[mid+1])
+                            : (arr[mid] >= val && val > arr[mid+1]);
+          if (inSeg) { lo = mid; break; }
+          if (asc ? arr[mid+1] <= val : arr[mid+1] >= val) lo = mid + 1;
+          else hi = mid;
+        }
+        const t = (val - arr[lo]) / (arr[lo+1] - arr[lo]);
+        return (lo + t) / (n - 1);
+      }
+
+      /**
+       * Fractional image position [0, 1] → physical axis value.
+       * Exact inverse of _axisValToFrac.
+       */
+      function _axisFracToVal(arr, frac) {
+        if (arr.length < 2) return arr.length ? arr[0] : 0;
+        const n   = arr.length;
+        const pos = Math.max(0, Math.min(1, frac)) * (n - 1);
+        const lo  = Math.min(Math.floor(pos), n - 2);
+        const t   = pos - lo;
+        return arr[lo] + t * (arr[lo+1] - arr[lo]);
+      }
+
       // ── scale bar ──────────────────────────────────────────────────────────
       function drawScaleBar() {
-        const w         = model.get('viewer_width');
-        const imgW      = model.get('image_width');
-        const scaleX    = model.get('scale_x');
-        const units     = model.get('units');
-        const zoom      = model.get('zoom');
-        const usePixels = !scaleX || scaleX <= 0 || units === 'px';
-        const targetPx  = w / 4;
-        if (usePixels) {
-          const ppsp = imgW / w;
+        const cw    = parseInt(imageCanvas.style.width)  || model.get('viewer_width');
+        const imgW  = model.get('image_width');
+        const units = model.get('units');
+        const zoom  = model.get('zoom');
+        const cx    = model.get('center_x');
+        const targetPx = cw / 4;
+
+        if (units === 'px') {
+          const ppsp = imgW / cw;
           const nice = findNice(targetPx * ppsp / zoom);
           scaleBarLine.style.width  = (nice / ppsp * zoom) + 'px';
           scaleBarLabel.textContent = fmtVal(nice) + ' px';
         } else {
-          const ppsp = imgW / w;
-          const nice = findNice(targetPx * ppsp / zoom * scaleX);
-          scaleBarLine.style.width  = (nice / scaleX / ppsp * zoom) + 'px';
+          const xArr = JSON.parse(model.get('x_axis_json'));
+          if (xArr.length < 2) return;
+          const fracPerPx = zoom >= 1.0 ? (1 / zoom) / cw : 1 / (cw * zoom);
+          const cx0 = zoom >= 1.0 ? Math.max(0.5/zoom, Math.min(1-0.5/zoom, cx)) : 0.5;
+          const physPerPx = Math.abs(
+            _axisFracToVal(xArr, Math.min(1, cx0 + fracPerPx)) - _axisFracToVal(xArr, cx0)
+          );
+          if (physPerPx <= 0) return;
+          const nice = findNice(targetPx * physPerPx);
+          scaleBarLine.style.width  = (nice / physPerPx) + 'px';
           scaleBarLabel.textContent = fmtVal(nice) + ' ' + units;
         }
       }
 
-      // ── axis rulers ────────────────────────────────────────────────────────
+      // ── axis rulers (uniform & non-uniform) ───────────────────────────────
       function drawAxes() {
         const xArr  = JSON.parse(model.get('x_axis_json'));
         const yArr  = JSON.parse(model.get('y_axis_json'));
         const units = model.get('units');
-        const w     = model.get('viewer_width');
-        const h     = model.get('viewer_height');
+        const cw    = parseInt(imageCanvas.style.width)  || model.get('viewer_width');
+        const ch    = parseInt(imageCanvas.style.height) || model.get('viewer_height');
+        const zoom  = model.get('zoom');
+        const cx    = model.get('center_x'), cy = model.get('center_y');
 
-        xCtx.clearRect(0, 0, w, AXIS_SIZE);
+        // Visible fractional range given current zoom/pan.
+        function _visFrac(zoom, centre) {
+          if (zoom >= 1.0) {
+            const half = 0.5 / zoom;
+            const c = Math.max(half, Math.min(1 - half, centre));
+            return [c - half, c + half];
+          }
+          return [0, 1];
+        }
+
+        // ── X axis ──────────────────────────────────────────────────────────
+        xCtx.clearRect(0, 0, cw, AXIS_SIZE);
         xCtx.fillStyle = '#f5f5f5';
-        xCtx.fillRect(0, 0, w, AXIS_SIZE);
+        xCtx.fillRect(0, 0, cw, AXIS_SIZE);
         if (xArr.length >= 2) {
-          const xMin = xArr[0], xMax = xArr[xArr.length - 1], range = xMax - xMin || 1;
-          const step = findNice(range / Math.max(3, Math.floor(w / 60)));
+          const [xF0, xF1] = _visFrac(zoom, cx);
+          const xVMin = _axisFracToVal(xArr, xF0);
+          const xVMax = _axisFracToVal(xArr, xF1);
+          const xRange = xVMax - xVMin || 1;
+          const step = findNice(xRange / Math.max(3, Math.floor(cw / 60)));
           xCtx.strokeStyle = '#555'; xCtx.lineWidth = 1;
           xCtx.fillStyle = '#333'; xCtx.font = '10px sans-serif'; xCtx.textAlign = 'center';
-          xCtx.beginPath(); xCtx.moveTo(0, 0); xCtx.lineTo(w, 0); xCtx.stroke();
-          for (let v = Math.ceil(xMin / step) * step; v <= xMax + step * 0.01; v += step) {
-            const px = (v - xMin) / range * w;
+          xCtx.beginPath(); xCtx.moveTo(0, 0); xCtx.lineTo(cw, 0); xCtx.stroke();
+          for (let v = Math.ceil(xVMin / step) * step; v <= xVMax + step * 0.01; v += step) {
+            const frac = _axisValToFrac(xArr, v);
+            let px;
+            if (zoom >= 1.0) {
+              const half = 0.5 / zoom;
+              const c = Math.max(half, Math.min(1 - half, cx));
+              px = (frac - (c - half)) / (2 * half) * cw;
+            } else {
+              px = (cw - cw * zoom) / 2 + frac * cw * zoom;
+            }
+            if (px < 0 || px > cw) continue;
             xCtx.beginPath(); xCtx.moveTo(px, 0); xCtx.lineTo(px, 6); xCtx.stroke();
             xCtx.fillText(fmtVal(v), px, 18);
           }
           xCtx.textAlign = 'right'; xCtx.fillStyle = '#777';
-          xCtx.fillText(units, w - 2, AXIS_SIZE - 4);
+          xCtx.fillText(units, cw - 2, AXIS_SIZE - 4);
+          if (!_axisIsUniform(xArr)) {
+            xCtx.textAlign = 'left'; xCtx.fillStyle = 'rgba(255,140,0,0.85)';
+            xCtx.font = '8px sans-serif';
+            xCtx.fillText('non-uniform', 2, AXIS_SIZE - 4);
+          }
         }
 
-        yCtx.clearRect(0, 0, AXIS_SIZE, h);
+        // ── Y axis ──────────────────────────────────────────────────────────
+        yCtx.clearRect(0, 0, AXIS_SIZE, ch);
         yCtx.fillStyle = '#f5f5f5';
-        yCtx.fillRect(0, 0, AXIS_SIZE, h);
+        yCtx.fillRect(0, 0, AXIS_SIZE, ch);
         if (yArr.length >= 2) {
-          const yMin = yArr[0], yMax = yArr[yArr.length - 1], range = yMax - yMin || 1;
-          const step = findNice(range / Math.max(3, Math.floor(h / 60)));
+          const [yF0, yF1] = _visFrac(zoom, cy);
+          const yVMin = _axisFracToVal(yArr, yF0);
+          const yVMax = _axisFracToVal(yArr, yF1);
+          const yRange = yVMax - yVMin || 1;
+          const step = findNice(yRange / Math.max(3, Math.floor(ch / 60)));
           yCtx.strokeStyle = '#555'; yCtx.lineWidth = 1;
           yCtx.fillStyle = '#333'; yCtx.font = '10px sans-serif'; yCtx.textAlign = 'right';
-          yCtx.beginPath(); yCtx.moveTo(AXIS_SIZE, 0); yCtx.lineTo(AXIS_SIZE, h); yCtx.stroke();
-          for (let v = Math.ceil(yMin / step) * step; v <= yMax + step * 0.01; v += step) {
-            const py = (v - yMin) / range * h;
+          yCtx.beginPath(); yCtx.moveTo(AXIS_SIZE, 0); yCtx.lineTo(AXIS_SIZE, ch); yCtx.stroke();
+          for (let v = Math.ceil(yVMin / step) * step; v <= yVMax + step * 0.01; v += step) {
+            const frac = _axisValToFrac(yArr, v);
+            let py;
+            if (zoom >= 1.0) {
+              const half = 0.5 / zoom;
+              const c = Math.max(half, Math.min(1 - half, cy));
+              py = (frac - (c - half)) / (2 * half) * ch;
+            } else {
+              py = (ch - ch * zoom) / 2 + frac * ch * zoom;
+            }
+            if (py < 0 || py > ch) continue;
             yCtx.beginPath(); yCtx.moveTo(AXIS_SIZE, py); yCtx.lineTo(AXIS_SIZE - 6, py); yCtx.stroke();
             yCtx.fillText(fmtVal(v), AXIS_SIZE - 8, py + 4);
+          }
+          if (!_axisIsUniform(yArr)) {
+            yCtx.save();
+            yCtx.translate(2, ch - 2);
+            yCtx.rotate(-Math.PI / 2);
+            yCtx.textAlign = 'left'; yCtx.fillStyle = 'rgba(255,140,0,0.85)';
+            yCtx.font = '8px sans-serif';
+            yCtx.fillText('non-uniform', 0, 0);
+            yCtx.restore();
           }
         }
       }
@@ -1009,6 +1118,21 @@ class Viewer2D(anywidget.AnyWidget):
             ovCtx.fillText(w.text || '', lx, ly);
             // small drag handle at anchor point
             _drawHandle(lx, ly, w.color);
+
+          } else if (w.type === 'crosshair') {
+            // "+" widget — full-canvas crosshair through (cx, cy); move-only.
+            const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
+            const cw2 = parseInt(overlayCanvas.style.width)  || model.get('viewer_width');
+            const ch2 = parseInt(overlayCanvas.style.height) || model.get('viewer_height');
+            // Horizontal arm
+            ovCtx.beginPath(); ovCtx.moveTo(0, ccy); ovCtx.lineTo(cw2, ccy); ovCtx.stroke();
+            // Vertical arm
+            ovCtx.beginPath(); ovCtx.moveTo(ccx, 0); ovCtx.lineTo(ccx, ch2); ovCtx.stroke();
+            // Centre dot (filled, slightly larger than stroke width)
+            const dotR = Math.max(3, ovCtx.lineWidth * 1.5);
+            ovCtx.beginPath(); ovCtx.arc(ccx, ccy, dotR, 0, Math.PI * 2);
+            ovCtx.fillStyle = w.color || '#00e5ff';
+            ovCtx.fill();
           }
 
           ovCtx.restore();
@@ -1028,8 +1152,8 @@ class Viewer2D(anywidget.AnyWidget):
           const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
           const ro = w.r_outer * scale, ri = w.r_inner * scale;
           return [
-            { x: ccx + ro, y: ccy },                       // hi=0 outer
-            { x: ccx + ri, y: ccy - ri * 0.3 },            // hi=1 inner
+            { x: ccx + ro, y: ccy },
+            { x: ccx + ri, y: ccy - ri * 0.3 },
           ];
         }
         if (w.type === 'polygon') {
@@ -1039,6 +1163,10 @@ class Viewer2D(anywidget.AnyWidget):
         if (w.type === 'label') {
           const [lx, ly] = _imgToCanvas(w.x, w.y);
           return [{ x: lx, y: ly }];
+        }
+        if (w.type === 'crosshair') {
+          // No resize handles — crosshair is move-only.
+          return [];
         }
         // rectangle (default)
         const [rx, ry] = _imgToCanvas(w.x, w.y);
@@ -1090,6 +1218,14 @@ class Viewer2D(anywidget.AnyWidget):
             // generous hit box around the anchor handle
             if (Math.abs(mx - lx) <= 20 && Math.abs(my - ly) <= 20)
               return { idx: i, mode: 'move', hi: -1 };
+          } else if (w.type === 'crosshair') {
+            // Hit within 10 px of the centre point OR along either arm (±4 px).
+            const [ccx, ccy] = _imgToCanvas(w.cx, w.cy);
+            const nearCentre = Math.sqrt((mx-ccx)**2 + (my-ccy)**2) <= 10;
+            const nearH = Math.abs(my - ccy) <= 4;
+            const nearV = Math.abs(mx - ccx) <= 4;
+            if (nearCentre || nearH || nearV)
+              return { idx: i, mode: 'move', hi: -1 };
           } else {
             // rectangle
             const [rx, ry] = _imgToCanvas(w.x, w.y);
@@ -1139,6 +1275,9 @@ class Viewer2D(anywidget.AnyWidget):
             widgets[ovDrag.idx].cx = s.cx + dx;
             widgets[ovDrag.idx].cy = s.cy + dy;
           } else if (s.type === 'annular') {
+            widgets[ovDrag.idx].cx = s.cx + dx;
+            widgets[ovDrag.idx].cy = s.cy + dy;
+          } else if (s.type === 'crosshair') {
             widgets[ovDrag.idx].cx = s.cx + dx;
             widgets[ovDrag.idx].cy = s.cy + dy;
           } else if (s.type === 'polygon') {
@@ -1301,8 +1440,6 @@ class Viewer2D(anywidget.AnyWidget):
         model.set('center_x', Math.max(0, Math.min(1, model.get('center_x') + (mx - 0.5) * (1 - ratio) / newZ)));
         model.set('center_y', Math.max(0, Math.min(1, model.get('center_y') + (my - 0.5) * (1 - ratio) / newZ)));
         model.save_changes();
-        zoomDisplay.textContent = newZ.toFixed(2) + 'x';
-        zoomDisplay.style.display = newZ !== 1.0 ? 'block' : 'none';
       });
 
       // ── keyboard shortcuts ─────────────────────────────────────────────────
@@ -1316,7 +1453,6 @@ class Viewer2D(anywidget.AnyWidget):
           model.set('display_min', model.get('hist_min'));
           model.set('display_max', model.get('hist_max'));
           model.save_changes();
-          zoomDisplay.style.display = 'none';
           e.preventDefault();
         } else if (key === 'l') {
           // Toggle between linear and log scale.
@@ -1459,13 +1595,84 @@ class Viewer2D(anywidget.AnyWidget):
         markerTooltip.style.top  = ly + 'px';
       }
 
+      // ── status bar helpers ─────────────────────────────────────────────────
+      function _fmtPhys(v) {
+        // Format a physical coordinate value compactly.
+        if (!isFinite(v)) return '?';
+        const a = Math.abs(v);
+        if (a === 0)      return '0';
+        if (a >= 1e4)     return v.toExponential(2);
+        if (a >= 100)     return v.toFixed(1);
+        if (a >= 1)       return v.toFixed(2);
+        if (a >= 1e-2)    return v.toFixed(4);
+        return v.toExponential(2);
+      }
+
+      function _updateStatusBar(canvasMx, canvasMy) {
+        const iw    = model.get('image_width');
+        const ih    = model.get('image_height');
+        const units = model.get('units');
+
+        // Image-pixel coordinates (float, may be fractional).
+        const [ix, iy] = _canvasToImg(canvasMx, canvasMy);
+        const pixX = Math.floor(ix), pixY = Math.floor(iy);
+
+        // Clamp to valid image area.
+        if (pixX < 0 || pixX >= iw || pixY < 0 || pixY >= ih) {
+          statusBar.style.display = 'none';
+          return;
+        }
+
+        // Physical coordinates via axis arrays.
+        const xArr = JSON.parse(model.get('x_axis_json'));
+        const yArr = JSON.parse(model.get('y_axis_json'));
+        const physX = xArr.length >= 2 ? _axisFracToVal(xArr, ix / iw) : ix;
+        const physY = yArr.length >= 2 ? _axisFracToVal(yArr, iy / ih) : iy;
+
+        // Pixel value from the raw uint8 image bytes.
+        const raw = model.get('image_bytes');
+        let bytes;
+        if (raw instanceof Uint8Array)                     bytes = raw;
+        else if (raw instanceof ArrayBuffer)               bytes = new Uint8Array(raw);
+        else if (raw && raw.buffer instanceof ArrayBuffer) bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+        else                                               bytes = new Uint8Array(0);
+
+        // Recover the original data value from the stored uint8 via hist range.
+        let valStr = '–';
+        if (bytes.length === iw * ih) {
+          const raw8  = bytes[pixY * iw + pixX];
+          const hMin  = model.get('hist_min');
+          const hMax  = model.get('hist_max');
+          const val   = hMin + (raw8 / 255) * (hMax - hMin);
+          valStr = _fmtPhys(val);
+        }
+
+        // Build the status string.
+        const showPhys = units !== 'px';
+        let xPart, yPart;
+        if (showPhys) {
+          xPart = `x: ${_fmtPhys(physX)} ${units} (${pixX} px)`;
+          yPart = `y: ${_fmtPhys(physY)} ${units} (${pixY} px)`;
+        } else {
+          xPart = `x: ${pixX} px`;
+          yPart = `y: ${pixY} px`;
+        }
+
+        statusBar.textContent = `${xPart}   ${yPart}   value: ${valStr}`;
+        statusBar.style.display = 'block';
+      }
+
       imageCanvas.addEventListener('mousemove', (e) => {
+        const rect = imageCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+        // Always update the status overlay, even while dragging/panning.
+        _updateStatusBar(mx, my);
+
         if (ovDrag || isPanning || isResizing) {
           markerTooltip.style.display = 'none';
           return;
         }
-        const rect = imageCanvas.getBoundingClientRect();
-        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
 
         // Overlay widget cursor first
         const hit = _hitTest(e.clientX, e.clientY);
@@ -1492,6 +1699,7 @@ class Viewer2D(anywidget.AnyWidget):
 
       imageCanvas.addEventListener('mouseleave', () => {
         markerTooltip.style.display = 'none';
+        statusBar.style.display = 'none';
       });
 
       // ── model listeners ────────────────────────────────────────────────────
@@ -1523,9 +1731,6 @@ class Viewer2D(anywidget.AnyWidget):
         syncCanvasSizes(); drawImage(); drawHistogram();
       });
       model.on('change:zoom', () => {
-        const z = model.get('zoom');
-        zoomDisplay.textContent = z.toFixed(2) + 'x';
-        zoomDisplay.style.display = z !== 1.0 ? 'block' : 'none';
         drawImage();
       });
       model.on('change:center_x', drawImage);
@@ -1959,13 +2164,13 @@ class Viewer2D(anywidget.AnyWidget):
         self.scale_mode = mode
 
     def add_widget(self, kind: str, color: str = "#00e5ff", **kwargs: object) -> str:
-        """Add a moveable, resizable overlay widget to the viewer.
+        """Add a moveable overlay widget to the viewer.
 
         Parameters
         ----------
         kind :
             One of ``'circle'``, ``'rectangle'``, ``'annular'``,
-            ``'polygon'``, or ``'label'``.
+            ``'polygon'``, ``'label'``, or ``'crosshair'``.
         color :
             CSS color string (default cyan ``'#00e5ff'``).
         **kwargs
@@ -1977,12 +2182,14 @@ class Viewer2D(anywidget.AnyWidget):
             * **polygon** – ``vertices`` — list of ``[x, y]`` image-px points
               (minimum 3).
             * **label** – ``x``, ``y``, ``text``, ``fontsize``.
+            * **crosshair** – ``cx``, ``cy`` (center, image px).
+              Move-only; draws a full-canvas ``+`` through the centre point.
 
         Returns
         -------
         str
-            Unique widget ID.  Pass to :meth:`get_widget`, :meth:`remove_widget`,
-            or :meth:`set_polygon_vertices`.
+            Unique widget ID.  Pass to :meth:`get_widget`,
+            :meth:`remove_widget`, or :meth:`set_polygon_vertices`.
 
         Raises
         ------
@@ -1991,7 +2198,7 @@ class Viewer2D(anywidget.AnyWidget):
             vertices, or if ``r_inner >= r_outer`` for an annular widget.
         """
         kind = kind.lower()
-        valid = ("circle", "rectangle", "annular", "polygon", "label")
+        valid = ("circle", "rectangle", "annular", "polygon", "label", "crosshair")
         if kind not in valid:
             raise ValueError(f"kind must be one of {valid}, got {kind!r}")
         iw, ih = self.image_width, self.image_height
@@ -2046,6 +2253,14 @@ class Viewer2D(anywidget.AnyWidget):
             entry = {
                 "id": wid, "type": "polygon",
                 "vertices": verts,
+                "color": color,
+            }
+        elif kind == "crosshair":
+            entry = {
+                "id":    wid,
+                "type":  "crosshair",
+                "cx":    _f("cx", iw / 2),
+                "cy":    _f("cy", ih / 2),
                 "color": color,
             }
         else:  # label
@@ -2198,6 +2413,50 @@ class Viewer2D(anywidget.AnyWidget):
             y=y if y is not None else self.image_height * 0.1,
             text=text,
             fontsize=fontsize,
+        )
+
+    def add_crosshair_widget(
+        self,
+        cx: float | None = None,
+        cy: float | None = None,
+        color: str = "#00e5ff",
+    ) -> str:
+        """Add a crosshair (``+``) overlay widget.
+
+        The crosshair draws two full-canvas lines — one horizontal and one
+        vertical — intersecting at ``(cx, cy)``.  It is **move-only**: there
+        are no resize handles and no resize interaction.
+
+        Dragging anywhere on either arm (within 4 canvas px) or near the
+        centre point (within 10 canvas px) moves the crosshair.
+
+        Parameters
+        ----------
+        cx :
+            Horizontal centre position in image-pixel units.
+            Defaults to the image centre.
+        cy :
+            Vertical centre position in image-pixel units.
+            Defaults to the image centre.
+        color :
+            CSS colour string (default cyan ``'#00e5ff'``).
+
+        Returns
+        -------
+        str
+            Widget ID.
+
+        Examples
+        --------
+        >>> wid = v.add_crosshair_widget(cx=128, cy=128)
+        >>> v.get_widget(wid)
+        {'id': ..., 'type': 'crosshair', 'cx': 128.0, 'cy': 128.0, 'color': '#00e5ff'}
+        """
+        return self.add_widget(
+            "crosshair",
+            color=color,
+            cx=cx if cx is not None else self.image_width / 2,
+            cy=cy if cy is not None else self.image_height / 2,
         )
 
     def remove_widget(self, wid: str) -> None:
