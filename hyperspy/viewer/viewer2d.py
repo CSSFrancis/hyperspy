@@ -141,6 +141,76 @@ class Viewer2D(anywidget.AnyWidget):
       const dpr       = window.devicePixelRatio || 1;
       const AXIS_SIZE = 40;
 
+      // ── theme detection ────────────────────────────────────────────────────
+      // Reads the host environment's colour scheme by sampling the computed
+      // background of the nearest scrollable/opaque ancestor.  Falls back to
+      // prefers-color-scheme.  Returns a plain object with all UI colours.
+      function _isDarkBg(el) {
+        // Walk up the DOM to find a non-transparent background.
+        let node = el.parentElement;
+        while (node && node !== document.body) {
+          const bg = window.getComputedStyle(node).backgroundColor;
+          const m  = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+          if (m) {
+            const [r, g, b] = [+m[1], +m[2], +m[3]];
+            // Skip fully-transparent
+            if (!(r === 0 && g === 0 && b === 0 && bg.includes('0)'))) {
+              // Perceived luminance (sRGB)
+              return (0.299 * r + 0.587 * g + 0.114 * b) < 128;
+            }
+          }
+          node = node.parentElement;
+        }
+        // Fallback: OS-level preference
+        return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+
+      function _makeTheme(dark) {
+        return dark ? {
+          bg:          '#1e1e2e',
+          bgCanvas:    '#181825',
+          bgHist:      '#181825',
+          border:      '#44475a',
+          axisBg:      '#1e1e2e',
+          tickStroke:  '#6272a4',
+          tickText:    '#cdd6f4',
+          unitText:    '#6272a4',
+          gridStroke:  'rgba(98,114,164,0.25)',
+          dark:        true,
+        } : {
+          bg:          '#f0f0f0',
+          bgCanvas:    '#ffffff',
+          bgHist:      '#ffffff',
+          border:      '#cccccc',
+          axisBg:      '#f0f0f0',
+          tickStroke:  '#666666',
+          tickText:    '#333333',
+          unitText:    '#888888',
+          gridStroke:  'rgba(0,0,0,0.08)',
+          dark:        false,
+        };
+      }
+
+      let theme = _makeTheme(_isDarkBg(el));
+
+      function _applyTheme() {
+        theme = _makeTheme(_isDarkBg(el));
+        container.style.background    = theme.bg;
+        imageCanvas.style.borderColor = theme.border;
+        xAxisCanvas.style.background  = theme.axisBg;
+        yAxisCanvas.style.background  = theme.axisBg;
+        histCanvas.style.borderColor  = theme.border;
+        histCanvas.style.background   = theme.bgHist;
+        drawAxes();
+        drawHistogram();
+      }
+
+      // Re-theme when the host switches (e.g. JupyterLab toggle)
+      const _mq = window.matchMedia('(prefers-color-scheme: dark)');
+      _mq.addEventListener('change', _applyTheme);
+      const _themeObserver = new MutationObserver(_applyTheme);
+      _themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-jp-theme-name', 'data-vscode-theme-kind', 'class'] });
+
       // ── DOM ────────────────────────────────────────────────────────────────
       const outerContainer = document.createElement('div');
       outerContainer.style.cssText = 'position:relative;display:inline-block;';
@@ -148,7 +218,7 @@ class Viewer2D(anywidget.AnyWidget):
       const container = document.createElement('div');
       container.style.cssText =
         `display:flex;flex-direction:row;gap:${model.get('gap')}px;` +
-        'background:#f5f5f5;padding:10px;border-radius:4px;position:relative;';
+        `background:${theme.bg};padding:10px;border-radius:4px;position:relative;`;
 
       const histWidth = model.get('histogram_width');
 
@@ -159,18 +229,18 @@ class Viewer2D(anywidget.AnyWidget):
       // Image canvas
       const imageCanvas = document.createElement('canvas');
       imageCanvas.tabIndex = 1;
-      imageCanvas.style.cssText = 'outline:none;cursor:default;background:white;border:1px solid #ccc;border-radius:2px;';
+      imageCanvas.style.cssText = `outline:none;cursor:default;background:${theme.bgCanvas};border:1px solid ${theme.border};border-radius:2px;`;
       const imgCtx = imageCanvas.getContext('2d');
       imageCanvas.addEventListener('focus', () => { imageCanvas.style.boxShadow = '0 0 0 2px rgba(76,175,80,0.5)'; });
       imageCanvas.addEventListener('blur',  () => { imageCanvas.style.boxShadow = 'none'; });
 
       // Axis canvases
       const xAxisCanvas = document.createElement('canvas');
-      xAxisCanvas.style.cssText = 'display:block;background:#f5f5f5;';
+      xAxisCanvas.style.cssText = `display:block;background:${theme.axisBg};`;
       const xCtx = xAxisCanvas.getContext('2d');
 
       const yAxisCanvas = document.createElement('canvas');
-      yAxisCanvas.style.cssText = 'display:block;background:#f5f5f5;';
+      yAxisCanvas.style.cssText = `display:block;background:${theme.axisBg};`;
       const yCtx = yAxisCanvas.getContext('2d');
 
       // Layout: y-axis | (image / x-axis)
@@ -234,7 +304,7 @@ class Viewer2D(anywidget.AnyWidget):
       // Histogram canvas
       const histCanvas = document.createElement('canvas');
       histCanvas.style.cssText =
-        `background:white;border:1px solid #ccc;border-radius:2px;` +
+        `background:${theme.bgHist};border:1px solid ${theme.border};border-radius:2px;` +
         `display:${model.get('histogram_visible') ? 'block' : 'none'};`;
       const histCtx = histCanvas.getContext('2d');
 
@@ -425,7 +495,7 @@ class Viewer2D(anywidget.AnyWidget):
 
         // ── X axis ──────────────────────────────────────────────────────────
         xCtx.clearRect(0, 0, cw, AXIS_SIZE);
-        xCtx.fillStyle = '#f5f5f5';
+        xCtx.fillStyle = theme.axisBg;
         xCtx.fillRect(0, 0, cw, AXIS_SIZE);
         if (xArr.length >= 2) {
           const [xF0, xF1] = _visFrac(zoom, cx);
@@ -433,8 +503,8 @@ class Viewer2D(anywidget.AnyWidget):
           const xVMax = _axisFracToVal(xArr, xF1);
           const xRange = xVMax - xVMin || 1;
           const step = findNice(xRange / Math.max(3, Math.floor(cw / 60)));
-          xCtx.strokeStyle = '#555'; xCtx.lineWidth = 1;
-          xCtx.fillStyle = '#333'; xCtx.font = '10px sans-serif'; xCtx.textAlign = 'center';
+          xCtx.strokeStyle = theme.tickStroke; xCtx.lineWidth = 1;
+          xCtx.fillStyle = theme.tickText; xCtx.font = '10px sans-serif'; xCtx.textAlign = 'center';
           xCtx.beginPath(); xCtx.moveTo(0, 0); xCtx.lineTo(cw, 0); xCtx.stroke();
           for (let v = Math.ceil(xVMin / step) * step; v <= xVMax + step * 0.01; v += step) {
             const frac = _axisValToFrac(xArr, v);
@@ -450,7 +520,7 @@ class Viewer2D(anywidget.AnyWidget):
             xCtx.beginPath(); xCtx.moveTo(px, 0); xCtx.lineTo(px, 6); xCtx.stroke();
             xCtx.fillText(fmtVal(v), px, 18);
           }
-          xCtx.textAlign = 'right'; xCtx.fillStyle = '#777';
+          xCtx.textAlign = 'right'; xCtx.fillStyle = theme.unitText;
           xCtx.fillText(units, cw - 2, AXIS_SIZE - 4);
           if (!_axisIsUniform(xArr)) {
             xCtx.textAlign = 'left'; xCtx.fillStyle = 'rgba(255,140,0,0.85)';
@@ -461,7 +531,7 @@ class Viewer2D(anywidget.AnyWidget):
 
         // ── Y axis ──────────────────────────────────────────────────────────
         yCtx.clearRect(0, 0, AXIS_SIZE, ch);
-        yCtx.fillStyle = '#f5f5f5';
+        yCtx.fillStyle = theme.axisBg;
         yCtx.fillRect(0, 0, AXIS_SIZE, ch);
         if (yArr.length >= 2) {
           const [yF0, yF1] = _visFrac(zoom, cy);
@@ -469,8 +539,8 @@ class Viewer2D(anywidget.AnyWidget):
           const yVMax = _axisFracToVal(yArr, yF1);
           const yRange = yVMax - yVMin || 1;
           const step = findNice(yRange / Math.max(3, Math.floor(ch / 60)));
-          yCtx.strokeStyle = '#555'; yCtx.lineWidth = 1;
-          yCtx.fillStyle = '#333'; yCtx.font = '10px sans-serif'; yCtx.textAlign = 'right';
+          yCtx.strokeStyle = theme.tickStroke; yCtx.lineWidth = 1;
+          yCtx.fillStyle = theme.tickText; yCtx.font = '10px sans-serif'; yCtx.textAlign = 'right';
           yCtx.beginPath(); yCtx.moveTo(AXIS_SIZE, 0); yCtx.lineTo(AXIS_SIZE, ch); yCtx.stroke();
           for (let v = Math.ceil(yVMin / step) * step; v <= yVMax + step * 0.01; v += step) {
             const frac = _axisValToFrac(yArr, v);
@@ -579,7 +649,7 @@ class Viewer2D(anywidget.AnyWidget):
           imgCtx.drawImage(tmp, srcX, srcY, visW, visH, 0, 0, cw, ch);
         } else {
           const dstW = cw * zoom, dstH = ch * zoom;
-          imgCtx.fillStyle = '#ffffff';
+          imgCtx.fillStyle = theme.bgCanvas;
           imgCtx.fillRect(0, 0, cw, ch);
           imgCtx.drawImage(tmp, 0, 0, iw, ih, (cw - dstW) / 2, (ch - dstH) / 2, dstW, dstH);
         }
@@ -689,7 +759,7 @@ class Viewer2D(anywidget.AnyWidget):
           }
           histCtx.fillStyle = g;
           histCtx.fillRect(0, 0, cbW, h);
-          histCtx.strokeStyle = '#666';
+          histCtx.strokeStyle = theme.tickStroke;
           histCtx.lineWidth = 1;
           histCtx.strokeRect(0, 0, cbW, h);
 
@@ -708,7 +778,7 @@ class Viewer2D(anywidget.AnyWidget):
         }
 
         // ── min/max labels ──────────────────────────────────────────────────
-        histCtx.fillStyle = '#666';
+        histCtx.fillStyle = theme.tickText;
         histCtx.font = '10px monospace';
         histCtx.textAlign = 'left';
         histCtx.fillText(hMax.toFixed(2), chartX + 2, 12);
@@ -868,6 +938,8 @@ class Viewer2D(anywidget.AnyWidget):
           const color     = ms.color     || '#ff0000';
           const linewidth = ms.linewidth != null ? ms.linewidth : 1.5;
           const type      = ms.type || 'circles';
+          const fillColor = ms.fill_color || null;
+          const fillAlpha = ms.fill_alpha != null ? ms.fill_alpha : 0.3;
 
           mkCtx.save();
           mkCtx.strokeStyle = color;
@@ -882,6 +954,13 @@ class Viewer2D(anywidget.AnyWidget):
               const r = (sizes[i] != null ? sizes[i] : (sizes[0] != null ? sizes[0] : 5)) * scale;
               mkCtx.beginPath();
               mkCtx.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+              if (fillColor) {
+                mkCtx.save();
+                mkCtx.globalAlpha = fillAlpha;
+                mkCtx.fillStyle = fillColor;
+                mkCtx.fill();
+                mkCtx.restore();
+              }
               mkCtx.stroke();
             }
 
@@ -923,6 +1002,13 @@ class Viewer2D(anywidget.AnyWidget):
               const ang = ((angles[i] != null ? angles[i]  : (angles[0]  != null ? angles[0]  : 0)) * Math.PI) / 180;
               mkCtx.beginPath();
               mkCtx.ellipse(cx, cy, Math.max(1, rw), Math.max(1, rh), ang, 0, Math.PI * 2);
+              if (fillColor) {
+                mkCtx.save();
+                mkCtx.globalAlpha = fillAlpha;
+                mkCtx.fillStyle = fillColor;
+                mkCtx.fill();
+                mkCtx.restore();
+              }
               mkCtx.stroke();
             }
 
@@ -950,6 +1036,13 @@ class Viewer2D(anywidget.AnyWidget):
               mkCtx.save();
               mkCtx.translate(cx, cy);
               mkCtx.rotate(ang);
+              if (fillColor) {
+                mkCtx.save();
+                mkCtx.globalAlpha = fillAlpha;
+                mkCtx.fillStyle = fillColor;
+                mkCtx.fillRect(-rw / 2, -rh / 2, rw, rh);
+                mkCtx.restore();
+              }
               mkCtx.strokeRect(-rw / 2, -rh / 2, rw, rh);
               mkCtx.restore();
             }
@@ -965,6 +1058,13 @@ class Viewer2D(anywidget.AnyWidget):
               mkCtx.save();
               mkCtx.translate(cx, cy);
               mkCtx.rotate(ang);
+              if (fillColor) {
+                mkCtx.save();
+                mkCtx.globalAlpha = fillAlpha;
+                mkCtx.fillStyle = fillColor;
+                mkCtx.fillRect(-side / 2, -side / 2, side, side);
+                mkCtx.restore();
+              }
               mkCtx.strokeRect(-side / 2, -side / 2, side, side);
               mkCtx.restore();
             }
@@ -980,6 +1080,30 @@ class Viewer2D(anywidget.AnyWidget):
               const [cx, cy] = _imgToCanvas(offsets[i][0], offsets[i][1]);
               const label = texts[i] != null ? String(texts[i]) : '';
               mkCtx.fillText(label, cx, cy);
+            }
+
+          } else if (type === 'polygons') {
+            // Each entry in ms.vertices_list is one polygon: [[x,y], ...]
+            const vertsList = ms.vertices_list || [];
+            for (let i = 0; i < vertsList.length; i++) {
+              const verts = vertsList[i];
+              if (!verts || verts.length < 2) continue;
+              mkCtx.beginPath();
+              const [px0, py0] = _imgToCanvas(verts[0][0], verts[0][1]);
+              mkCtx.moveTo(px0, py0);
+              for (let k = 1; k < verts.length; k++) {
+                const [px, py] = _imgToCanvas(verts[k][0], verts[k][1]);
+                mkCtx.lineTo(px, py);
+              }
+              mkCtx.closePath();
+              if (fillColor) {
+                mkCtx.save();
+                mkCtx.globalAlpha = fillAlpha;
+                mkCtx.fillStyle = fillColor;
+                mkCtx.fill();
+                mkCtx.restore();
+              }
+              mkCtx.stroke();
             }
           }
 
@@ -2651,6 +2775,7 @@ class Viewer2D(anywidget.AnyWidget):
     # Circles
     # ------------------------------------------------------------------
     def add_circles(self, offsets, sizes, color="#ff0000", linewidth=1.5,
+                    fill_color=None, fill_alpha=0.3,
                     marker_id=None, label=None, labels=None) -> str:
         """Add or replace a set of circle markers.
 
@@ -2662,8 +2787,14 @@ class Viewer2D(anywidget.AnyWidget):
             ``[[x, y], ...]`` centre positions in image-pixel space.
         sizes : array-like or scalar
             Radius of each circle in image-pixel units.
-        color : str, optional  CSS colour (default ``'#ff0000'``).
-        linewidth : float, optional  Stroke width in canvas pixels.
+        color : str, optional
+            Stroke colour (default ``'#ff0000'``).
+        linewidth : float, optional
+            Stroke width in canvas pixels.
+        fill_color : str or None, optional
+            Fill colour.  ``None`` (default) draws outline only.
+        fill_alpha : float, optional
+            Fill opacity in ``[0, 1]`` (default ``0.3``).
         marker_id : str, optional
             Replace an existing set if supplied; otherwise append a new one.
         label : str, optional
@@ -2677,16 +2808,21 @@ class Viewer2D(anywidget.AnyWidget):
         """
         offsets = self._check_offsets(offsets)
         n = len(offsets)
-        ms = {"type": "circles", "offsets": offsets.tolist(),
-              "sizes": self._broadcast_1d(sizes, n, "sizes"),
-              "color": color, "linewidth": linewidth,
-              **self._opt_labels(label, labels, n)}
+        ms: dict = {"type": "circles", "offsets": offsets.tolist(),
+                    "sizes": self._broadcast_1d(sizes, n, "sizes"),
+                    "color": color, "linewidth": linewidth,
+                    **self._opt_labels(label, labels, n)}
+        if fill_color is not None:
+            ms["fill_color"] = fill_color
+            ms["fill_alpha"] = float(fill_alpha)
         return self._write_marker(ms, marker_id)
 
     def set_circles(self, offsets, sizes, color="#ff0000", linewidth=1.5,
+                    fill_color=None, fill_alpha=0.3,
                     marker_id=None, label=None, labels=None) -> str:
         """Alias for :meth:`add_circles`."""
         return self.add_circles(offsets, sizes, color=color, linewidth=linewidth,
+                                fill_color=fill_color, fill_alpha=fill_alpha,
                                 marker_id=marker_id, label=label, labels=labels)
 
     # ------------------------------------------------------------------
@@ -2732,6 +2868,7 @@ class Viewer2D(anywidget.AnyWidget):
     # ------------------------------------------------------------------
     def add_ellipses(self, offsets, widths, heights, angles=0,
                      color="#ff0000", linewidth=1.5,
+                     fill_color=None, fill_alpha=0.3,
                      marker_id=None, label=None, labels=None) -> str:
         """Add or replace a set of ellipse markers.
 
@@ -2744,6 +2881,10 @@ class Viewer2D(anywidget.AnyWidget):
         angles : array-like or scalar           Rotation in degrees.
         color : str, optional
         linewidth : float, optional
+        fill_color : str or None, optional
+            Fill colour.  ``None`` draws outline only.
+        fill_alpha : float, optional
+            Fill opacity in ``[0, 1]`` (default ``0.3``).
         marker_id : str, optional
         label : str, optional
         labels : list of str, optional
@@ -2754,20 +2895,25 @@ class Viewer2D(anywidget.AnyWidget):
         """
         offsets = self._check_offsets(offsets)
         n = len(offsets)
-        ms = {"type": "ellipses", "offsets": offsets.tolist(),
-              "widths":  self._broadcast_1d(widths,  n, "widths"),
-              "heights": self._broadcast_1d(heights, n, "heights"),
-              "angles":  self._broadcast_1d(angles,  n, "angles"),
-              "color": color, "linewidth": linewidth,
-              **self._opt_labels(label, labels, n)}
+        ms: dict = {"type": "ellipses", "offsets": offsets.tolist(),
+                    "widths":  self._broadcast_1d(widths,  n, "widths"),
+                    "heights": self._broadcast_1d(heights, n, "heights"),
+                    "angles":  self._broadcast_1d(angles,  n, "angles"),
+                    "color": color, "linewidth": linewidth,
+                    **self._opt_labels(label, labels, n)}
+        if fill_color is not None:
+            ms["fill_color"] = fill_color
+            ms["fill_alpha"] = float(fill_alpha)
         return self._write_marker(ms, marker_id)
 
     def set_ellipses(self, offsets, widths, heights, angles=0,
                      color="#ff0000", linewidth=1.5,
+                     fill_color=None, fill_alpha=0.3,
                      marker_id=None, label=None, labels=None) -> str:
         """Alias for :meth:`add_ellipses`."""
         return self.add_ellipses(offsets, widths, heights, angles=angles,
                                  color=color, linewidth=linewidth,
+                                 fill_color=fill_color, fill_alpha=fill_alpha,
                                  marker_id=marker_id, label=label, labels=labels)
 
     # ------------------------------------------------------------------
@@ -2814,6 +2960,7 @@ class Viewer2D(anywidget.AnyWidget):
     # ------------------------------------------------------------------
     def add_rectangles(self, offsets, widths, heights, angles=0,
                        color="#ff0000", linewidth=1.5,
+                       fill_color=None, fill_alpha=0.3,
                        marker_id=None, label=None, labels=None) -> str:
         """Add or replace a set of rectangle markers.
 
@@ -2824,6 +2971,10 @@ class Viewer2D(anywidget.AnyWidget):
         angles : array-like or scalar  Rotation in degrees.
         color : str, optional
         linewidth : float, optional
+        fill_color : str or None, optional
+            Fill colour.  ``None`` draws outline only.
+        fill_alpha : float, optional
+            Fill opacity in ``[0, 1]`` (default ``0.3``).
         marker_id : str, optional
         label : str, optional
         labels : list of str, optional
@@ -2834,20 +2985,25 @@ class Viewer2D(anywidget.AnyWidget):
         """
         offsets = self._check_offsets(offsets)
         n = len(offsets)
-        ms = {"type": "rectangles", "offsets": offsets.tolist(),
-              "widths":  self._broadcast_1d(widths,  n, "widths"),
-              "heights": self._broadcast_1d(heights, n, "heights"),
-              "angles":  self._broadcast_1d(angles,  n, "angles"),
-              "color": color, "linewidth": linewidth,
-              **self._opt_labels(label, labels, n)}
+        ms: dict = {"type": "rectangles", "offsets": offsets.tolist(),
+                    "widths":  self._broadcast_1d(widths,  n, "widths"),
+                    "heights": self._broadcast_1d(heights, n, "heights"),
+                    "angles":  self._broadcast_1d(angles,  n, "angles"),
+                    "color": color, "linewidth": linewidth,
+                    **self._opt_labels(label, labels, n)}
+        if fill_color is not None:
+            ms["fill_color"] = fill_color
+            ms["fill_alpha"] = float(fill_alpha)
         return self._write_marker(ms, marker_id)
 
     def set_rectangles(self, offsets, widths, heights, angles=0,
                        color="#ff0000", linewidth=1.5,
+                       fill_color=None, fill_alpha=0.3,
                        marker_id=None, label=None, labels=None) -> str:
         """Alias for :meth:`add_rectangles`."""
         return self.add_rectangles(offsets, widths, heights, angles=angles,
                                    color=color, linewidth=linewidth,
+                                   fill_color=fill_color, fill_alpha=fill_alpha,
                                    marker_id=marker_id, label=label, labels=labels)
 
     # ------------------------------------------------------------------
@@ -2855,6 +3011,7 @@ class Viewer2D(anywidget.AnyWidget):
     # ------------------------------------------------------------------
     def add_squares(self, offsets, widths, angles=0,
                     color="#ff0000", linewidth=1.5,
+                    fill_color=None, fill_alpha=0.3,
                     marker_id=None, label=None, labels=None) -> str:
         """Add or replace a set of square markers.
 
@@ -2867,6 +3024,10 @@ class Viewer2D(anywidget.AnyWidget):
         angles : array-like or scalar  Rotation in degrees.
         color : str, optional
         linewidth : float, optional
+        fill_color : str or None, optional
+            Fill colour.  ``None`` draws outline only.
+        fill_alpha : float, optional
+            Fill opacity in ``[0, 1]`` (default ``0.3``).
         marker_id : str, optional
         label : str, optional
         labels : list of str, optional
@@ -2877,20 +3038,91 @@ class Viewer2D(anywidget.AnyWidget):
         """
         offsets = self._check_offsets(offsets)
         n = len(offsets)
-        ms = {"type": "squares", "offsets": offsets.tolist(),
-              "widths": self._broadcast_1d(widths, n, "widths"),
-              "angles": self._broadcast_1d(angles, n, "angles"),
-              "color": color, "linewidth": linewidth,
-              **self._opt_labels(label, labels, n)}
+        ms: dict = {"type": "squares", "offsets": offsets.tolist(),
+                    "widths": self._broadcast_1d(widths, n, "widths"),
+                    "angles": self._broadcast_1d(angles, n, "angles"),
+                    "color": color, "linewidth": linewidth,
+                    **self._opt_labels(label, labels, n)}
+        if fill_color is not None:
+            ms["fill_color"] = fill_color
+            ms["fill_alpha"] = float(fill_alpha)
         return self._write_marker(ms, marker_id)
 
     def set_squares(self, offsets, widths, angles=0,
                     color="#ff0000", linewidth=1.5,
+                    fill_color=None, fill_alpha=0.3,
                     marker_id=None, label=None, labels=None) -> str:
         """Alias for :meth:`add_squares`."""
         return self.add_squares(offsets, widths, angles=angles,
                                 color=color, linewidth=linewidth,
+                                fill_color=fill_color, fill_alpha=fill_alpha,
                                 marker_id=marker_id, label=label, labels=labels)
+
+    # ------------------------------------------------------------------
+    # Polygons
+    # ------------------------------------------------------------------
+    def add_polygons(self, vertices_list, color="#ff0000", linewidth=1.5,
+                     fill_color=None, fill_alpha=0.3,
+                     marker_id=None, label=None, labels=None) -> str:
+        """Add or replace a set of polygon markers.
+
+        Unlike the interactive overlay :meth:`add_polygon_widget`, these are
+        read-only markers drawn on the markers canvas.
+
+        Parameters
+        ----------
+        vertices_list : list of array-like
+            Each element is one polygon: ``[[x, y], ...]`` in image-pixel
+            units.  Minimum 3 vertices per polygon.
+        color : str, optional
+            Stroke colour (default ``'#ff0000'``).
+        linewidth : float, optional
+            Stroke width in canvas pixels.
+        fill_color : str or None, optional
+            Fill colour.  ``None`` draws outline only.
+        fill_alpha : float, optional
+            Fill opacity in ``[0, 1]`` (default ``0.3``).
+        marker_id : str, optional
+            Replace an existing set if supplied; otherwise append a new one.
+        label : str, optional
+            Tooltip shown when hovering over the collection.
+        labels : list of str, optional
+            Per-polygon hover tooltip.
+
+        Returns
+        -------
+        str  Marker ID.
+
+        Examples
+        --------
+        >>> v.add_polygons([[[10,10],[50,10],[30,40]], [[60,60],[100,60],[80,100]]],
+        ...                color='#00ff00', fill_color='#00ff00', fill_alpha=0.2)
+        """
+        # Normalise each polygon to a plain list of [float, float] pairs.
+        vlist = []
+        for poly in vertices_list:
+            arr = np.asarray(poly, dtype=float)
+            if arr.ndim != 2 or arr.shape[1] != 2:
+                raise ValueError("each polygon must be shape (N, 2)")
+            if len(arr) < 3:
+                raise ValueError("each polygon needs at least 3 vertices")
+            vlist.append(arr.tolist())
+        n = len(vlist)
+        ms: dict = {"type": "polygons", "vertices_list": vlist,
+                    "color": color, "linewidth": linewidth,
+                    **self._opt_labels(label, labels, n)}
+        if fill_color is not None:
+            ms["fill_color"] = fill_color
+            ms["fill_alpha"] = float(fill_alpha)
+        return self._write_marker(ms, marker_id)
+
+    def set_polygons(self, vertices_list, color="#ff0000", linewidth=1.5,
+                     fill_color=None, fill_alpha=0.3,
+                     marker_id=None, label=None, labels=None) -> str:
+        """Alias for :meth:`add_polygons`."""
+        return self.add_polygons(vertices_list, color=color, linewidth=linewidth,
+                                 fill_color=fill_color, fill_alpha=fill_alpha,
+                                 marker_id=marker_id, label=label, labels=labels)
 
     # ------------------------------------------------------------------
     # Texts
@@ -2935,15 +3167,19 @@ class Viewer2D(anywidget.AnyWidget):
     # Legacy aliases
     # ------------------------------------------------------------------
     def set_markers(self, offsets, sizes, color="#ff0000", linewidth=1.5,
+                    fill_color=None, fill_alpha=0.3,
                     marker_id=None, label=None, labels=None) -> str:
         """Alias for :meth:`add_circles` (backwards compatibility)."""
         return self.add_circles(offsets, sizes, color=color, linewidth=linewidth,
+                                fill_color=fill_color, fill_alpha=fill_alpha,
                                 marker_id=marker_id, label=label, labels=labels)
 
     def add_markers(self, offsets, sizes, color="#ff0000", linewidth=1.5,
+                    fill_color=None, fill_alpha=0.3,
                     marker_id=None, label=None, labels=None) -> str:
         """Alias for :meth:`add_circles` (backwards compatibility)."""
         return self.add_circles(offsets, sizes, color=color, linewidth=linewidth,
+                                fill_color=fill_color, fill_alpha=fill_alpha,
                                 marker_id=marker_id, label=label, labels=labels)
 
     # ------------------------------------------------------------------
