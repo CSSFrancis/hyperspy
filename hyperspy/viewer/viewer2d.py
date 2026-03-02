@@ -115,6 +115,11 @@ class Viewer2D(anywidget.AnyWidget):
     histogram_width   = traitlets.Int(120).tag(sync=True)
     gap               = traitlets.Int(10).tag(sync=True)
 
+    # Colormap — name for display, data as a JSON [[r,g,b],…] array of 256
+    # uint8 triples resolved on the Python side from matplotlib / colorcet.
+    colormap_name = traitlets.Unicode("gray").tag(sync=True)
+    colormap_data = traitlets.Unicode("[]").tag(sync=True)
+
     # Zoom / pan state.
     zoom     = traitlets.Float(1.0).tag(sync=True)
     center_x = traitlets.Float(0.5).tag(sync=True)
@@ -402,53 +407,56 @@ class Viewer2D(anywidget.AnyWidget):
 
         imgCtx.imageSmoothingEnabled = false;
 
-        // Remap raw uint8 values through display window + scale mode.
+        // ── intensity LUT: raw uint8 → remapped uint8 [0,255] ───────────────
         const dMin  = model.get('display_min');
         const dMax  = model.get('display_max');
         const hMin  = model.get('hist_min');
         const hMax  = model.get('hist_max');
-        const mode  = model.get('scale_mode');   // 'linear' | 'log' | 'symlog'
+        const mode  = model.get('scale_mode');
         const range = hMax - hMin || 1;
 
-        // Convert raw uint8 [0,255] back to data value, then remap to [0,255].
-        const lut = new Uint8Array(256);
+        const intensityLut = new Uint8Array(256);
         for (let raw8 = 0; raw8 < 256; raw8++) {
-          // data value corresponding to this uint8
           const val = hMin + (raw8 / 255) * range;
           let t;
           if (mode === 'log') {
-            const dMinC  = Math.max(dMin,  1e-10);
-            const dMaxC  = Math.max(dMax,  dMinC + 1e-10);
-            const valC   = Math.max(val,   1e-10);
-            t = (Math.log10(valC) - Math.log10(dMinC)) / (Math.log10(dMaxC) - Math.log10(dMinC));
+            const dMinC = Math.max(dMin, 1e-10), dMaxC = Math.max(dMax, dMinC + 1e-10);
+            t = (Math.log10(Math.max(val, 1e-10)) - Math.log10(dMinC)) /
+                (Math.log10(dMaxC) - Math.log10(dMinC));
           } else if (mode === 'symlog') {
             const linThresh = Math.max((dMax - dMin) * 0.01, 1e-10);
-            const symlogVal = val >= 0
-              ? (val <= linThresh ? val / linThresh : 1 + Math.log10(val / linThresh))
-              : -(Math.abs(val) <= linThresh ? Math.abs(val) / linThresh : 1 + Math.log10(Math.abs(val) / linThresh));
-            const symlogMin = dMin >= 0
-              ? (dMin <= linThresh ? dMin / linThresh : 1 + Math.log10(dMin / linThresh))
-              : -(Math.abs(dMin) <= linThresh ? Math.abs(dMin) / linThresh : 1 + Math.log10(Math.abs(dMin) / linThresh));
-            const symlogMax = dMax >= 0
-              ? (dMax <= linThresh ? dMax / linThresh : 1 + Math.log10(dMax / linThresh))
-              : -(Math.abs(dMax) <= linThresh ? Math.abs(dMax) / linThresh : 1 + Math.log10(Math.abs(dMax) / linThresh));
-            const symRange = symlogMax - symlogMin || 1;
-            t = (symlogVal - symlogMin) / symRange;
+            const sl = v => v >= 0
+              ? (v <= linThresh ? v / linThresh : 1 + Math.log10(v / linThresh))
+              : -(Math.abs(v) <= linThresh ? Math.abs(v) / linThresh : 1 + Math.log10(Math.abs(v) / linThresh));
+            t = (sl(val) - sl(dMin)) / ((sl(dMax) - sl(dMin)) || 1);
           } else {
-            // linear
             t = (val - dMin) / ((dMax - dMin) || 1);
           }
-          lut[raw8] = Math.max(0, Math.min(255, Math.round(t * 255)));
+          intensityLut[raw8] = Math.max(0, Math.min(255, Math.round(t * 255)));
         }
 
+        // ── colormap LUT: uint8 [0,255] → [r, g, b] ─────────────────────────
+        let cmapData;
+        try { cmapData = JSON.parse(model.get('colormap_data')); } catch (_) { cmapData = []; }
+        const hasCmap = Array.isArray(cmapData) && cmapData.length === 256;
+
+        // ── build RGBA image ─────────────────────────────────────────────────
         const imageData = imgCtx.createImageData(iw, ih);
         for (let i = 0; i < bytes.length; i++) {
-          const g = lut[bytes[i]];
-          imageData.data[i * 4]     = g;
-          imageData.data[i * 4 + 1] = g;
-          imageData.data[i * 4 + 2] = g;
-          imageData.data[i * 4 + 3] = 255;
+          const mapped = intensityLut[bytes[i]];
+          const base   = i * 4;
+          if (hasCmap) {
+            imageData.data[base]     = cmapData[mapped][0];
+            imageData.data[base + 1] = cmapData[mapped][1];
+            imageData.data[base + 2] = cmapData[mapped][2];
+          } else {
+            imageData.data[base]     = mapped;
+            imageData.data[base + 1] = mapped;
+            imageData.data[base + 2] = mapped;
+          }
+          imageData.data[base + 3] = 255;
         }
+
         const tmp = document.createElement('canvas');
         tmp.width = iw; tmp.height = ih;
         tmp.getContext('2d').putImageData(imageData, 0, 0);
@@ -531,15 +539,19 @@ class Viewer2D(anywidget.AnyWidget):
           }
         }
 
-        // ── colorbar (reflects current scale mode) ──────────────────────────
+        // ── colorbar (reflects current scale mode + colormap) ───────────────
         if (showCB) {
+          let cmapData;
+          try { cmapData = JSON.parse(model.get('colormap_data')); } catch (_) { cmapData = []; }
+          const hasCmap = Array.isArray(cmapData) && cmapData.length === 256;
+
           const g = histCtx.createLinearGradient(0, 0, 0, h);
-          const steps = 32;
+          const steps = 64;
           for (let i = 0; i <= steps; i++) {
             const t = i / steps;
             // position in data space (top = hMax, bottom = hMin)
             const val = hMin + (1 - t) * (hMax - hMin);
-            // normalise val through display window + scale mode → grey [0,1]
+            // normalise val through display window + scale mode → [0,1]
             let mapped;
             if (mode === 'log') {
               const dMinC = Math.max(dMin, 1e-10), dMaxC = Math.max(dMax, dMinC + 1e-10);
@@ -555,14 +567,35 @@ class Viewer2D(anywidget.AnyWidget):
             } else {
               mapped = (val - dMin) / ((dMax - dMin) || 1);
             }
-            const grey = Math.max(0, Math.min(255, Math.round(mapped * 255)));
-            g.addColorStop(t, `rgb(${grey},${grey},${grey})`);
+            const idx = Math.max(0, Math.min(255, Math.round(mapped * 255)));
+            let colStr;
+            if (hasCmap) {
+              const [r, gv, b] = cmapData[idx];
+              colStr = `rgb(${r},${gv},${b})`;
+            } else {
+              const grey = idx;
+              colStr = `rgb(${grey},${grey},${grey})`;
+            }
+            g.addColorStop(t, colStr);
           }
           histCtx.fillStyle = g;
           histCtx.fillRect(0, 0, cbW, h);
           histCtx.strokeStyle = '#666';
           histCtx.lineWidth = 1;
           histCtx.strokeRect(0, 0, cbW, h);
+
+          // Colormap name badge along the left edge of the colorbar.
+          const cmapName = model.get('colormap_name');
+          if (cmapName && cmapName !== 'gray') {
+            histCtx.save();
+            histCtx.translate(cbW / 2, h - 4);
+            histCtx.rotate(-Math.PI / 2);
+            histCtx.font = 'bold 8px sans-serif';
+            histCtx.textAlign = 'left';
+            histCtx.fillStyle = 'rgba(255,255,255,0.85)';
+            histCtx.fillText(cmapName, 0, 0);
+            histCtx.restore();
+          }
         }
 
         // ── min/max labels ──────────────────────────────────────────────────
@@ -1468,6 +1501,7 @@ class Viewer2D(anywidget.AnyWidget):
       model.on('change:scale_mode',        () => { drawImage(); drawHistogram(); });
       model.on('change:display_min',       () => { drawImage(); drawHistogram(); });
       model.on('change:display_max',       () => { drawImage(); drawHistogram(); });
+      model.on('change:colormap_data',     () => { drawImage(); drawHistogram(); });
       model.on('change:show_colorbar',     drawHistogram);
       model.on('change:x_axis_json',       () => { if (!model.get('use_scalebar')) drawAxes(); });
       model.on('change:y_axis_json',       () => { if (!model.get('use_scalebar')) drawAxes(); });
@@ -1596,20 +1630,33 @@ class Viewer2D(anywidget.AnyWidget):
             self.display_min = float(vmin)
             self.display_max = float(vmax)
             self.scale_mode = "linear"
+            self.colormap_name = "gray"
+            self.colormap_data = json.dumps(self._build_colormap_lut("gray"))
 
     # ------------------------------------------------------------------
     def _to_png_bytes(self) -> bytes:
         """Render the current image as a PNG byte string.
 
-        Used as a static fallback in environments that do not run the full
-        anywidget JavaScript runtime (e.g. PyCharm's notebook preview).
+        Applies the current colormap so the PyCharm static preview matches
+        the live widget.  Falls back gracefully if PIL is not installed.
         """
         from PIL import Image as _PILImage
 
         arr = np.frombuffer(self.image_bytes, dtype=np.uint8).reshape(
             self.image_height, self.image_width
         )
-        img = _PILImage.fromarray(arr, mode="L")
+        # Apply colormap if set and not plain gray.
+        try:
+            lut = json.loads(self.colormap_data)
+            if isinstance(lut, list) and len(lut) == 256:
+                lut_arr = np.array(lut, dtype=np.uint8)   # (256, 3)
+                rgb = lut_arr[arr]                          # (H, W, 3)
+                img = _PILImage.fromarray(rgb, mode="RGB")
+            else:
+                raise ValueError
+        except Exception:
+            img = _PILImage.fromarray(arr, mode="L")
+
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         return buf.getvalue()
@@ -1672,7 +1719,8 @@ class Viewer2D(anywidget.AnyWidget):
         y_axis = np.asarray(y_axis, dtype=float)
 
         equal = _equal_scale(x_axis, y_axis)
-        dx = (x_axis[-1] - x_axis[0]) / (len(x_axis) - 1) if len(x_axis) > 1 else 1.0
+        dx = float(np.median(np.diff(x_axis))) if len(x_axis) > 1 else 1.0
+        dy = float(np.median(np.diff(y_axis))) if len(y_axis) > 1 else 1.0
 
         img = data.astype(float)
         vmin, vmax = np.nanmin(img), np.nanmax(img)
@@ -1684,30 +1732,166 @@ class Viewer2D(anywidget.AnyWidget):
         counts, edges = np.histogram(data.flatten(), bins=256)
         bin_centers = (edges[:-1] + edges[1:]) / 2
         histogram_json = json.dumps(
-            {
-                "bins": bin_centers.tolist(),
-                "counts": counts.tolist(),
-            }
+            {"bins": bin_centers.tolist(), "counts": counts.tolist()}
         )
 
         with self.hold_trait_notifications():
-            self.image_bytes = img_u8.tobytes()
-            self.image_width = w
-            self.image_height = h
-            self.use_scalebar = equal
-            self.scale_x = float(abs(dx))
-            self.scale_y = float(abs(dx))
-            self.x_axis_json = json.dumps(x_axis.tolist())
-            self.y_axis_json = json.dumps(y_axis.tolist())
+            self.image_bytes    = img_u8.tobytes()
+            self.image_width    = w
+            self.image_height   = h
+            self.use_scalebar   = equal
+            self.scale_x        = float(abs(dx))
+            self.scale_y        = float(abs(dy))
+            self.x_axis_json    = json.dumps(x_axis.tolist())
+            self.y_axis_json    = json.dumps(y_axis.tolist())
             self.histogram_data = histogram_json
-            self.hist_min = float(vmin)
-            self.hist_max = float(vmax)
-            self.display_min = float(vmin)
-            self.display_max = float(vmax)
+            self.hist_min       = float(vmin)
+            self.hist_max       = float(vmax)
+            self.display_min    = float(vmin)
+            self.display_max    = float(vmax)
+            # Re-apply the current colormap to match the new data range.
+            self.colormap_data  = json.dumps(
+                self._build_colormap_lut(self.colormap_name)
+            )
             if units is not None:
                 self.units = units
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _build_colormap_lut(name: str) -> list[list[int]]:
+        """Resolve *name* to a 256×3 uint8 RGB lookup table.
+
+        Resolution order
+        ----------------
+        1. ``colorcet`` — if installed, ``cc.cm.<name>`` is tried first so
+           that colorcet short aliases (``'fire'``, ``'bmy'``, ``'CET-L1'``,
+           etc.) work directly.
+        2. ``matplotlib.cm.get_cmap(name)`` — covers all built-in matplotlib
+           colormaps as well as any registered third-party colormaps.
+
+        Parameters
+        ----------
+        name :
+            Colormap name string.  Case-sensitive for colorcet names;
+            case-insensitive for matplotlib names.
+
+        Returns
+        -------
+        list of [r, g, b]
+            256 entries, each a list of three ``int`` values in ``[0, 255]``.
+
+        Raises
+        ------
+        ValueError
+            If the name cannot be resolved by either library.
+        """
+        import matplotlib.cm as _mcm
+
+        cmap = None
+
+        # 1. Try colorcet first (optional dependency).
+        try:
+            import colorcet as _cc  # noqa: F401
+            if hasattr(_cc.cm, name):
+                cmap = getattr(_cc.cm, name)
+        except ImportError:
+            pass  # colorcet not installed — fall through to matplotlib
+
+        # 2. Fall back to matplotlib (covers built-ins + any registered maps).
+        if cmap is None:
+            try:
+                cmap = _mcm.get_cmap(name)
+            except (ValueError, KeyError) as exc:
+                raise ValueError(
+                    f"Colormap {name!r} not found in matplotlib or colorcet.\n"
+                    f"Install colorcet for additional perceptually-uniform maps: "
+                    f"pip install colorcet"
+                ) from exc
+
+        xs = np.linspace(0.0, 1.0, 256)
+        rgba = cmap(xs)                                        # (256, 4) float [0,1]
+        rgb8 = (rgba[:, :3] * 255).round().astype(np.uint8)   # (256, 3) uint8
+        return rgb8.tolist()
+
+    def set_colormap(self, name: str) -> None:
+        """Set the display colormap.
+
+        Supports every colormap available in **matplotlib** and, if installed,
+        **colorcet** (perceptually-uniform maps).
+
+        Parameters
+        ----------
+        name :
+            Colormap name string.  Examples:
+
+            *Matplotlib built-ins*
+            ``'gray'``, ``'viridis'``, ``'plasma'``, ``'inferno'``,
+            ``'magma'``, ``'cividis'``, ``'hot'``, ``'jet'``, ``'RdBu'``,
+            ``'coolwarm'``, ``'turbo'``, …
+
+            *Colorcet (install with* ``pip install colorcet`` *)*
+            ``'fire'``, ``'bmy'``, ``'CET-L1'``, ``'CET-D1'``,
+            ``'CET-R1'``, ``'isolum'``, ``'rainbow'``, …
+
+        Raises
+        ------
+        ValueError
+            If *name* cannot be resolved by either library.
+
+        Examples
+        --------
+        >>> v.set_colormap('viridis')
+        >>> v.set_colormap('fire')      # colorcet
+        >>> v.set_colormap('RdBu')      # diverging
+        """
+        lut = self._build_colormap_lut(name)
+        with self.hold_trait_notifications():
+            self.colormap_name = name
+            self.colormap_data = json.dumps(lut)
+
+    @staticmethod
+    def list_colormaps(filter: str | None = None) -> list[str]:
+        """Return a sorted list of available colormap names.
+
+        Includes all **matplotlib** colormaps and, if **colorcet** is
+        installed, all colorcet colormaps registered in matplotlib.
+
+        Parameters
+        ----------
+        filter :
+            Optional substring filter (case-insensitive).  Only names
+            containing this string are returned.  For example
+            ``filter='seq'`` returns sequential colormaps whose name
+            contains ``'seq'``.
+
+        Returns
+        -------
+        list of str
+            Sorted list of colormap name strings.
+
+        Examples
+        --------
+        >>> Viewer2D.list_colormaps()                    # all colormaps
+        >>> Viewer2D.list_colormaps('viridis')           # exact match search
+        >>> Viewer2D.list_colormaps('cet')               # all colorcet maps
+        """
+        import matplotlib.cm as _mcm
+        names: set[str] = set(_mcm._colormaps)
+
+        try:
+            import colorcet as _cc
+            for attr in dir(_cc.cm):
+                if not attr.startswith('_'):
+                    names.add(attr)
+        except ImportError:
+            pass
+
+        result = sorted(names)
+        if filter is not None:
+            fl = filter.lower()
+            result = [n for n in result if fl in n.lower()]
+        return result
+
     def set_clim(
         self,
         vmin: float | None = None,
