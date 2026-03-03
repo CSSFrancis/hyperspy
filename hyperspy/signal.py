@@ -3259,6 +3259,81 @@ class BaseSignal(FancySlicing, MVA, MVATools):
         PLOT2D_KWARGS_DOCSTRING,
     )
 
+    def show(self, navigator="auto", axes_manager=None, plot_markers=True, **kwargs):
+        """Show the signal using the interactive widget viewers.
+
+        This is an **experimental** alternative to :meth:`plot` that renders
+        **both** the signal *and* navigator panels via
+        :class:`~hyperspy.viewer.viewer2d.Viewer2D` /
+        :class:`~hyperspy.viewer.viewer1d.Viewer1D` anywidget objects instead
+        of matplotlib figures.
+
+        A draggable pointer widget (vertical line for a 1-D navigator,
+        crosshair for a 2-D navigator) drives the navigation indices so the
+        signal panel updates as the pointer moves.
+
+        The method accepts the same arguments as :meth:`plot` and internally
+        calls it after temporarily swapping all explorer classes for their
+        widget-backed equivalents.
+
+        Parameters
+        ----------
+        navigator : str or BaseSignal or None
+            Same as for :meth:`plot`.
+        axes_manager : AxesManager or None
+            Same as for :meth:`plot`.
+        plot_markers : bool
+            Same as for :meth:`plot`.
+        **kwargs
+            Remaining keyword arguments are forwarded to :meth:`plot`.
+
+        Notes
+        -----
+        * Only 1-D and 2-D signal dimensions are fully supported.
+        * Markers stored in ``signal.metadata.Markers`` are accepted but not
+          yet forwarded to the widget renderer.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> import hyperspy.api as hs
+        >>> s = hs.signals.Signal2D(np.random.rand(5, 64, 64))
+        >>> s.show()
+        """
+        import hyperspy.drawing as drawing
+
+        # Temporarily swap all three explorer classes so that plot() uses the
+        # widget backend for both the signal and navigator panels.
+        # Originals are restored in the finally block regardless of errors.
+        _orig_he  = drawing.mpl_he.MPL_HyperExplorer
+        _orig_hie = drawing.mpl_hie.MPL_HyperImage_Explorer
+        _orig_hse = drawing.mpl_hse.MPL_HyperSignal1D_Explorer
+
+        try:
+            from hyperspy.drawing.widget_he  import Widget_HyperExplorer
+            from hyperspy.drawing.widget_hie import Widget_HyperImage_Explorer
+            from hyperspy.drawing.widget_hse import Widget_HyperSignal1D_Explorer
+
+            drawing.mpl_he.MPL_HyperExplorer            = Widget_HyperExplorer
+            drawing.mpl_hie.MPL_HyperImage_Explorer     = Widget_HyperImage_Explorer
+            drawing.mpl_hse.MPL_HyperSignal1D_Explorer  = Widget_HyperSignal1D_Explorer
+
+            # Pass a sentinel 'fig' so plot() skips the matplotlib subfigure
+            # block (which would otherwise create a dangling plt.figure).
+            # Widget_HyperExplorer.plot() pops and discards it.
+            kwargs.setdefault("fig", "_widget_sentinel_")
+
+            self.plot(
+                navigator=navigator,
+                axes_manager=axes_manager,
+                plot_markers=plot_markers,
+                **kwargs,
+            )
+        finally:
+            drawing.mpl_he.MPL_HyperExplorer            = _orig_he
+            drawing.mpl_hie.MPL_HyperImage_Explorer     = _orig_hie
+            drawing.mpl_hse.MPL_HyperSignal1D_Explorer  = _orig_hse
+
     def save(
         self, filename=None, overwrite=None, extension=None, file_format=None, **kwds
     ):

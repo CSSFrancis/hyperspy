@@ -25,6 +25,10 @@ __all__ = [
     "signal",
     "signal1d",
     "utils",
+    "widget_he",
+    "widget_hie",
+    "widget_hse",
+    "widget_plot",
     "widgets",
 ]
 

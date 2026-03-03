@@ -33,7 +33,7 @@ class MPL_HyperSignal1D_Explorer(MPL_HyperExplorer):
     """
 
     def __init__(self):
-        super(MPL_HyperSignal1D_Explorer, self).__init__()
+        super().__init__()
         self.xlabel = ""
         self.ylabel = ""
         self.right_pointer = None
