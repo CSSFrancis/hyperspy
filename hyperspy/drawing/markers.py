@@ -53,6 +53,8 @@ class Markers:
         plot_on_signal=True,
         name="",
         ScalarMappable_array=None,
+        label=None,
+        labels=None,
         **kwargs,
     ):
         """
@@ -231,6 +233,24 @@ class Markers:
         self.offset_transform = offset_transform
         self.transform = transform
         self._ScalarMappable_array = ScalarMappable_array
+
+        # Hover-tooltip labels.  Neither is forwarded to the matplotlib
+        # collection — they are widget-backend metadata only.
+        # label  : str | None
+        #     Shown when hovering any mark in the set.
+        # labels : list[str] | np.ndarray(dtype=object) | None
+        #     Per-mark labels.  When it is a numpy array with dtype=object
+        #     it is treated as an *iterating* argument: labels[nav_indices]
+        #     gives the list of strings for the current navigation position,
+        #     matching the same semantics as iterating ``offsets`` etc.
+        self.label = label
+        if labels is None:
+            self.labels = None
+        elif isinstance(labels, np.ndarray) and labels.dtype == object:
+            # Keep the raw object array so we can index it per nav position.
+            self.labels = labels
+        else:
+            self.labels = list(labels)
 
         # Events
         self.events = Events()
@@ -620,6 +640,8 @@ class Markers:
             "transform": self._transform,
             "kwargs": self.kwargs,
             "ScalarMappable_array": self._ScalarMappable_array,
+            "label":  self.label,
+            "labels": self.labels,
         }
         if class_name == "Markers":
             marker_dict["collection"] = self._collection_class.__name__
@@ -667,6 +689,59 @@ class Markers:
             current_keys = self._scale_kwarg(current_keys)
 
         return current_keys
+
+    def get_current_labels(self) -> list | None:
+        """Return the per-marker label list for the current navigation position.
+
+        When :attr:`labels` is a ``numpy.ndarray`` with ``dtype=object`` (an
+        *iterating* labels array whose shape matches the navigation shape of
+        the signal), the element at the current navigation indices is returned.
+        That element should itself be an array or list of strings — one entry
+        per mark at that navigation position.
+
+        When :attr:`labels` is a plain ``list`` it is returned as-is (static,
+        same for every navigation position).
+
+        Returns ``None`` when no labels have been set.
+
+        Examples
+        --------
+        Static labels (same at every navigation position)::
+
+            m = hs.plot.markers.Circles(
+                offsets=offsets,
+                labels=["A", "B", "C"],
+            )
+            m.get_current_labels()   # → ["A", "B", "C"]
+
+        Dynamic labels (one list per navigation position)::
+
+            labels = np.empty(nav_shape, dtype=object)
+            for idx in np.ndindex(nav_shape):
+                labels[idx] = [f"pt{i}" for i in range(n_pts_at_idx)]
+
+            m = hs.plot.markers.Circles(offsets=offsets, labels=labels)
+            # After s.add_marker(m) and navigating to position (2, 3):
+            m.get_current_labels()   # → labels[2, 3]  (list of strings)
+        """
+        if self.labels is None:
+            return None
+        if isinstance(self.labels, np.ndarray) and self.labels.dtype == object:
+            if self._axes_manager is None:
+                # Not yet attached to a signal; return flat first element or None
+                try:
+                    val = self.labels.flat[0]
+                    return list(val) if val is not None else None
+                except (IndexError, TypeError):
+                    return None
+            indices = self._axes_manager.indices
+            val = self.labels[indices]
+            if val is None:
+                return None
+            # Convert each entry to str to ensure JSON-serialisable output
+            return [str(v) for v in val]
+        # Static list
+        return self.labels
 
     def _scale_kwarg(self, kwds, key=None):
         """

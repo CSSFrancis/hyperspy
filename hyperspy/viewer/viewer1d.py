@@ -59,7 +59,7 @@ class Viewer1D(anywidget.AnyWidget):
     y_units : str, optional
         Unit label shown on the Y axis (default ``''``).
     color : str, optional
-        CSS colour of the primary line (default ``'#4fc3f7'``).
+        CSS color of the primary line (default ``'#4fc3f7'``).
     linewidth : float, optional
         Stroke width of the primary line in canvas pixels (default ``1.5``).
     label : str, optional

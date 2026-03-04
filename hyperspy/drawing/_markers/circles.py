@@ -33,6 +33,8 @@ class Circles(Markers):
         offset_transform="data",
         units="x",
         facecolors="none",
+        label=None,
+        labels=None,
         **kwargs,
     ):
         """
@@ -44,13 +46,15 @@ class Circles(Markers):
         sizes : numpy.ndarray
             The size of the circles in units defined by the argument units.
         facecolors : matplotlib color or list of color
-            Set the facecolor(s) of the markers. It can be a color
-            (all patches have same color), or a sequence of colors;
-            if it is a sequence the patches will cycle through the sequence.
-            If c is 'none', the patch will not be filled.
+            Set the facecolor(s) of the markers.
         %s
+        label : str or None
+            Hover-tooltip shown for every circle in this collection.
+        labels : list of str or None
+            Per-circle hover-tooltips.  ``labels[i]`` is shown when hovering
+            circle *i*.
         kwargs : dict
-            Keyword arguments are passed to :class:`matplotlib.collections.CircleCollection`.
+            Keyword arguments passed to :class:`matplotlib.collections.CircleCollection`.
         """
 
         if kwargs.setdefault("transform", "display") != "display":
@@ -68,6 +72,8 @@ class Circles(Markers):
             facecolors=facecolors,
             offset_transform=offset_transform,
             units=units,
+            label=label,
+            labels=labels,
             **kwargs,
         )
 

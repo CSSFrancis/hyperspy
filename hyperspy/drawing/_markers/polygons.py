@@ -26,17 +26,20 @@ class Polygons(Markers):
 
     _position_key = "verts"
 
-    def __init__(self, verts, transform="data", **kwargs):
+    def __init__(self, verts, transform="data", label=None, labels=None, **kwargs):
         """
         Initialize the set of Segments Markers.
 
         Parameters
         ----------
         verts : list of numpy.ndarray or list of list
-            The verts define the vertices of the polygons. Note that this can be
-            a ragged list and as such it is not automatically cast to a numpy
-            array as that would result in an array of objects.
-            In the form [[[x1,y1], [x2,y2], ... [xn, yn]],[[x1,y1], [x2,y2], ...[xm,ym]], ...].
+            The verts define the vertices of the polygons.
+            In the form [[[x1,y1], [x2,y2], ... [xn, yn]], ...].
+        label : str or None
+            Hover-tooltip shown for every polygon in this collection.
+        labels : list of str or None
+            Per-polygon hover-tooltips.  ``labels[i]`` is shown when hovering
+            polygon *i*.
         **kwargs : dict
             Additional keyword arguments are passed to
             :class:`matplotlib.collections.PolyCollection`
@@ -45,28 +48,18 @@ class Polygons(Markers):
         --------
         >>> import hyperspy.api as hs
         >>> import numpy as np
-        >>> # Create a Signal2D with 2 navigation dimensions
         >>> data = np.ones((25, 25, 100, 100))
         >>> s = hs.signals.Signal2D(data)
         >>> poylgon1 = [[1, 1], [20, 20], [1, 20], [25, 5]]
         >>> poylgon2 = [[50, 60], [90, 40], [60, 40], [23, 60]]
         >>> verts = [poylgon1, poylgon2]
-        >>> # Create the markers
         >>> m = hs.plot.markers.Polygons(
         ...     verts=verts,
         ...     linewidth=3,
         ...     facecolors=('g',),
         ...     )
-        >>> # Add the marker to the signal
         >>> s.plot()
         >>> s.add_marker(m)
-
-        Notes
-        -----
-        Unlike markers using ``offsets`` argument, the positions of the polygon
-        are defined by the ``verts`` argument and the tranform specifying the
-        coordinate system of the ``verts`` is ``transform``.
-
         """
         if kwargs.setdefault("offset_transform", "display") != "display":
             raise ValueError(
@@ -76,5 +69,6 @@ class Polygons(Markers):
             )
 
         super().__init__(
-            collection=PolyCollection, verts=verts, transform=transform, **kwargs
+            collection=PolyCollection, verts=verts, transform=transform,
+            label=label, labels=labels, **kwargs
         )

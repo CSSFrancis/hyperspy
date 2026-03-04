@@ -21,10 +21,13 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
+    "anywidget>=0.9.21",
     "cloudpickle",
     "dask[array]>=2023.2.1",
     "importlib-metadata>=3.6",
+    "ipykernel>=7.2.0",
     "jinja2", # improves representation of lazy signals by dask
+    "jupyterlab>=4.5.5",
     "matplotlib>=3.6",
     "natsort",
     "numpy>=1.22.0",
@@ -36,6 +39,7 @@ dependencies = [
     "scipy>=1.8.0",
     "sympy>=1.10",
     "tqdm>=4.59.0",
+    "traitlets>=5.14.3",
     "traits>=6.4.0",
 ]
 description = "Multidimensional data analysis toolbox"

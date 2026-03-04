@@ -49,6 +49,498 @@ _logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Marker-to-Viewer translation bridge
+# ---------------------------------------------------------------------------
+
+def _to_hex(c) -> str | None:
+    """Convert any matplotlib-understood colour spec to a CSS hex string.
+
+    Returns ``None`` if *c* is falsy or represents 'none'/'transparent'.
+    """
+    if c is None:
+        return None
+    if isinstance(c, str) and c.lower() in ("none", "transparent", ""):
+        return None
+    try:
+        import matplotlib.colors as _mc
+        rgba = _mc.to_rgba(c)
+        r, g, b = (int(round(v * 255)) for v in rgba[:3])
+        return f"#{r:02x}{g:02x}{b:02x}"
+    except Exception:
+        return str(c) if isinstance(c, str) else None
+
+
+def _color_sequence(kwargs: dict, n: int, key: str = "colors") -> list[str]:
+    """Extract a per-item colour list of length *n* from marker kwargs.
+
+    Checks ``key``, then ``colors``, ``color``, ``facecolor``, ``edgecolor``
+    in that order.  Each value is passed through :func:`_to_hex`.
+    Falls back to ``'#ff4444'``.
+    """
+    for k in (key, "colors", "color", "facecolor", "edgecolor"):
+        val = kwargs.get(k)
+        if val is None:
+            continue
+        if isinstance(val, str):
+            h = _to_hex(val)
+            if h:
+                return [h] * n
+            continue
+        try:
+            lst = list(val)
+        except TypeError:
+            continue
+        if len(lst) == 0:
+            continue
+        hexes = [_to_hex(v) or "#ff4444" for v in lst]
+        return [hexes[i % len(hexes)] for i in range(n)]
+    return ["#ff4444"] * n
+
+
+def _edge_color(kwargs: dict, n: int) -> list[str]:
+    """Return edge colours, preferring ``edgecolor`` / ``edgecolors`` over
+    the generic ``color`` / ``colors`` keys."""
+    for k in ("edgecolor", "edgecolors", "colors", "color"):
+        val = kwargs.get(k)
+        if val is None:
+            continue
+        if isinstance(val, str):
+            h = _to_hex(val)
+            if h:
+                return [h] * n
+            continue
+        try:
+            lst = list(val)
+        except TypeError:
+            continue
+        if not lst:
+            continue
+        hexes = [_to_hex(v) or "#ff4444" for v in lst]
+        return [hexes[i % len(hexes)] for i in range(n)]
+    return ["#ff4444"] * n
+
+
+def _fill_color(kwargs: dict) -> str | None:
+    """Return a single fill colour, preferring ``facecolor`` / ``facecolors``
+    over the generic ``color`` key.  Returns ``None`` when fill is 'none'."""
+    for k in ("facecolor", "facecolors", "color"):
+        val = kwargs.get(k)
+        if val is None:
+            continue
+        if isinstance(val, str):
+            return _to_hex(val)   # None when 'none'/'transparent'
+        try:
+            lst = list(val)
+            if lst:
+                return _to_hex(lst[0])
+        except TypeError:
+            pass
+    return None
+
+
+def _scalar(kwargs: dict, key: str, default):
+    """Return a scalar from marker kwargs, broadcasting if needed."""
+    val = kwargs.get(key, default)
+    if val is None:
+        return default
+    if hasattr(val, "__iter__") and not isinstance(val, str):
+        lst = list(val)
+        return lst[0] if lst else default
+    return val
+
+
+def _hs_marker_to_viewer1d(marker, viewer) -> str | None:
+    """Translate one HyperSpy ``Markers`` object → a ``Viewer1D`` marker set.
+
+    Returns the marker-set ID string assigned by the viewer, or ``None`` if
+    the marker type is not supported by the widget backend.
+
+    Parameters
+    ----------
+    marker :
+        A :class:`~hyperspy.drawing.markers.Markers` instance.
+    viewer :
+        A :class:`~hyperspy.viewer.viewer1d.Viewer1D` instance.
+    """
+    from hyperspy.drawing._markers.vertical_lines import VerticalLines
+    from hyperspy.drawing._markers.horizontal_lines import HorizontalLines
+    from hyperspy.drawing._markers.points import Points
+    from hyperspy.drawing._markers.lines import Lines
+    from hyperspy.drawing._markers.texts import Texts
+
+    try:
+        kwds = marker.get_current_kwargs()
+    except Exception:
+        _logger.debug("Could not get kwargs for marker %r; skipping.", marker)
+        return None
+
+    lw = float(_scalar(kwds, "linewidth", _scalar(kwds, "lw", 1.5)))
+
+    # ── VerticalLines ────────────────────────────────────────────────────────
+    if isinstance(marker, VerticalLines):
+        offsets = np.asarray(kwds.get("offsets", []), dtype=float).ravel()
+        if offsets.size == 0:
+            return None
+        n = len(offsets)
+        colors = _edge_color(kwds, n)
+        return viewer.add_vlines(
+            offsets=offsets,
+            color=colors[0],
+            linewidth=lw,
+            label=marker.label,
+            labels=marker.get_current_labels(),
+        )
+
+    # ── HorizontalLines ──────────────────────────────────────────────────────
+    if isinstance(marker, HorizontalLines):
+        offsets = np.asarray(kwds.get("offsets", []), dtype=float).ravel()
+        if offsets.size == 0:
+            return None
+        n = len(offsets)
+        colors = _edge_color(kwds, n)
+        return viewer.add_hlines(
+            offsets=offsets,
+            color=colors[0],
+            linewidth=lw,
+            label=marker.label,
+            labels=marker.get_current_labels(),
+        )
+
+    # ── Points ───────────────────────────────────────────────────────────────
+    if isinstance(marker, Points):
+        offsets = np.asarray(kwds.get("offsets", []), dtype=float)
+        if offsets.ndim == 1:
+            offsets = offsets[:, np.newaxis]
+        if offsets.size == 0:
+            return None
+        n = len(offsets)
+        sizes_raw = kwds.get("sizes", 5)
+        if hasattr(sizes_raw, "__iter__") and not isinstance(sizes_raw, str):
+            sizes = np.asarray(list(sizes_raw), dtype=float)
+            sizes = np.array([sizes[i % len(sizes)] for i in range(n)])
+        else:
+            sizes = np.full(n, float(sizes_raw))
+        radius = np.sqrt(sizes / np.pi)
+        ec = _edge_color(kwds, n)
+        fc = _fill_color(kwds)
+        return viewer.add_points(
+            offsets=offsets,
+            sizes=radius,
+            color=ec[0],
+            linewidth=lw,
+            fill_color=fc,
+            fill_alpha=0.3,
+            label=marker.label,
+            labels=marker.get_current_labels(),
+        )
+
+    # ── Lines (segments) ─────────────────────────────────────────────────────
+    if isinstance(marker, Lines):
+        segs = kwds.get("segments", [])
+        if len(segs) == 0:
+            return None
+        segs = np.asarray(segs, dtype=float)
+        if segs.ndim == 2 and segs.shape == (2, 2):
+            segs = segs[np.newaxis]
+        if segs.ndim != 3 or segs.shape[1:] != (2, 2):
+            return None
+        n = len(segs)
+        colors = _edge_color(kwds, n)
+        return viewer.add_lines(
+            segments=segs,
+            color=colors[0],
+            linewidth=lw,
+            label=marker.label,
+            labels=marker.get_current_labels(),
+        )
+
+    # ── Texts ────────────────────────────────────────────────────────────────
+    if isinstance(marker, Texts):
+        offsets = np.asarray(kwds.get("offsets", []), dtype=float)
+        if offsets.ndim == 1:
+            offsets = offsets[:, np.newaxis]
+        if offsets.size == 0:
+            return None
+        texts_raw = kwds.get("texts", kwds.get("strings", []))
+        texts = [str(t) for t in texts_raw]
+        n = len(offsets)
+        if len(texts) != n:
+            return None
+        colors = _edge_color(kwds, n)
+        fontsize = int(_scalar(kwds, "sizes", _scalar(kwds, "fontsize", 12)))
+        fontsize = max(8, min(fontsize, 24))
+        return viewer.add_texts(
+            offsets=offsets,
+            texts=texts,
+            color=colors[0],
+            fontsize=fontsize,
+            label=marker.label,
+            labels=marker.get_current_labels(),
+        )
+
+    _logger.debug(
+        "Marker type %r not supported in widget backend; skipping.",
+        type(marker).__name__,
+    )
+    return None
+
+
+def _hs_marker_to_viewer2d(marker, viewer) -> str | None:
+    """Translate one HyperSpy ``Markers`` object → a ``Viewer2D`` marker set.
+
+    Returns the marker-set ID string, or ``None`` if unsupported.
+    """
+    from hyperspy.drawing._markers.points import Points
+    from hyperspy.drawing._markers.circles import Circles
+    from hyperspy.drawing._markers.lines import Lines
+    from hyperspy.drawing._markers.texts import Texts
+    from hyperspy.drawing._markers.rectangles import Rectangles
+    from hyperspy.drawing._markers.squares import Squares
+    from hyperspy.drawing._markers.ellipses import Ellipses
+    from hyperspy.drawing._markers.arrows import Arrows
+
+    try:
+        kwds = marker.get_current_kwargs()
+    except Exception:
+        _logger.debug("Could not get kwargs for marker %r; skipping.", marker)
+        return None
+
+    lw = float(_scalar(kwds, "linewidth", _scalar(kwds, "lw", 1.5)))
+
+    # ── Points / Circles ─────────────────────────────────────────────────────
+    if isinstance(marker, (Points, Circles)):
+        offsets = np.asarray(kwds.get("offsets", []), dtype=float)
+        if offsets.ndim == 1 and offsets.size == 2:
+            offsets = offsets[np.newaxis]
+        if offsets.ndim != 2 or offsets.shape[1] != 2 or offsets.size == 0:
+            return None
+        n = len(offsets)
+        sizes_raw = kwds.get("sizes", 5)
+        if hasattr(sizes_raw, "__iter__") and not isinstance(sizes_raw, str):
+            sizes = np.asarray(list(sizes_raw), dtype=float)
+            sizes = np.array([sizes[i % len(sizes)] for i in range(n)])
+        else:
+            sizes = np.full(n, float(sizes_raw))
+        radius = np.sqrt(sizes / np.pi)
+        ec = _edge_color(kwds, n)
+        fc = _fill_color(kwds)
+        return viewer.add_circles(
+            offsets=offsets, sizes=radius,
+            color=ec[0], linewidth=lw,
+            fill_color=fc, fill_alpha=0.3,
+            label=marker.label, labels=marker.get_current_labels(),
+        )
+
+    # ── Lines ────────────────────────────────────────────────────────────────
+    if isinstance(marker, Lines):
+        segs = kwds.get("segments", [])
+        if len(segs) == 0:
+            return None
+        segs = np.asarray(segs, dtype=float)
+        if segs.ndim == 2 and segs.shape == (2, 2):
+            segs = segs[np.newaxis]
+        if segs.ndim != 3 or segs.shape[1:] != (2, 2):
+            return None
+        n = len(segs)
+        ec = _edge_color(kwds, n)
+        return viewer.add_lines(
+            segments=segs,
+            color=ec[0], linewidth=lw,
+            label=marker.label, labels=marker.get_current_labels(),
+        )
+
+    # ── Rectangles ───────────────────────────────────────────────────────────
+    if isinstance(marker, Rectangles):
+        offsets = np.asarray(kwds.get("offsets", []), dtype=float)
+        if offsets.ndim == 1 and offsets.size == 2:
+            offsets = offsets[np.newaxis]
+        if offsets.ndim != 2 or offsets.shape[1] != 2 or offsets.size == 0:
+            return None
+        n = len(offsets)
+        ec = _edge_color(kwds, n)
+        fc = _fill_color(kwds)
+        return viewer.add_rectangles(
+            offsets=offsets,
+            widths=kwds.get("widths", np.ones(n)),
+            heights=kwds.get("heights", np.ones(n)),
+            angles=kwds.get("angles", np.zeros(n)),
+            color=ec[0], linewidth=lw,
+            fill_color=fc, fill_alpha=0.3,
+            label=marker.label, labels=marker.get_current_labels(),
+        )
+
+    # ── Squares ──────────────────────────────────────────────────────────────
+    if isinstance(marker, Squares):
+        offsets = np.asarray(kwds.get("offsets", []), dtype=float)
+        if offsets.ndim == 1 and offsets.size == 2:
+            offsets = offsets[np.newaxis]
+        if offsets.ndim != 2 or offsets.shape[1] != 2 or offsets.size == 0:
+            return None
+        n = len(offsets)
+        ec = _edge_color(kwds, n)
+        fc = _fill_color(kwds)
+        return viewer.add_squares(
+            offsets=offsets,
+            widths=kwds.get("widths", np.ones(n)),
+            angles=kwds.get("angles", np.zeros(n)),
+            color=ec[0], linewidth=lw,
+            fill_color=fc, fill_alpha=0.3,
+            label=marker.label, labels=marker.get_current_labels(),
+        )
+
+    # ── Ellipses ─────────────────────────────────────────────────────────────
+    if isinstance(marker, Ellipses):
+        offsets = np.asarray(kwds.get("offsets", []), dtype=float)
+        if offsets.ndim == 1 and offsets.size == 2:
+            offsets = offsets[np.newaxis]
+        if offsets.ndim != 2 or offsets.shape[1] != 2 or offsets.size == 0:
+            return None
+        n = len(offsets)
+        ec = _edge_color(kwds, n)
+        fc = _fill_color(kwds)
+        return viewer.add_ellipses(
+            offsets=offsets,
+            widths=kwds.get("widths", np.ones(n)),
+            heights=kwds.get("heights", np.ones(n)),
+            angles=kwds.get("angles", np.zeros(n)),
+            color=ec[0], linewidth=lw,
+            fill_color=fc, fill_alpha=0.3,
+            label=marker.label, labels=marker.get_current_labels(),
+        )
+
+    # ── Arrows ───────────────────────────────────────────────────────────────
+    if isinstance(marker, Arrows):
+        offsets = np.asarray(kwds.get("offsets", []), dtype=float)
+        if offsets.ndim == 1 and offsets.size == 2:
+            offsets = offsets[np.newaxis]
+        if offsets.ndim != 2 or offsets.shape[1] != 2 or offsets.size == 0:
+            return None
+        n = len(offsets)
+        ec = _edge_color(kwds, n)
+        return viewer.add_arrows(
+            offsets=offsets,
+            U=kwds.get("U", np.zeros(n)),
+            V=kwds.get("V", np.zeros(n)),
+            color=ec[0], linewidth=lw,
+            label=marker.label, labels=marker.get_current_labels(),
+        )
+
+    # ── Texts ────────────────────────────────────────────────────────────────
+    if isinstance(marker, Texts):
+        offsets = np.asarray(kwds.get("offsets", []), dtype=float)
+        if offsets.ndim == 1 and offsets.size == 2:
+            offsets = offsets[np.newaxis]
+        if offsets.ndim != 2 or offsets.shape[1] != 2 or offsets.size == 0:
+            return None
+        texts_raw = kwds.get("texts", kwds.get("strings", []))
+        texts = [str(t) for t in texts_raw]
+        n = len(offsets)
+        if len(texts) != n:
+            return None
+        ec = _edge_color(kwds, n)
+        fontsize = int(_scalar(kwds, "sizes", _scalar(kwds, "fontsize", 12)))
+        fontsize = max(8, min(fontsize, 24))
+        return viewer.add_texts(
+            offsets=offsets, texts=texts,
+            color=ec[0], fontsize=fontsize,
+            label=marker.label, labels=marker.get_current_labels(),
+        )
+
+    _logger.debug(
+        "Marker type %r not supported in Viewer2D widget backend; skipping.",
+        type(marker).__name__,
+    )
+    return None
+
+
+class _HsMarkerBridge:
+    """Manages the lifecycle of one HyperSpy ``Markers`` object on a viewer widget.
+
+    The bridge:
+    * translates the marker to a viewer marker-set on construction via a
+      supplied ``translate_fn``
+    * re-pushes the marker-set on every navigation index change (for
+      iterating/variable-length markers)
+    * removes the viewer marker-set when :meth:`close` is called
+
+    Parameters
+    ----------
+    marker :
+        A :class:`~hyperspy.drawing.markers.Markers` instance.
+    viewer :
+        A :class:`~hyperspy.viewer.viewer1d.Viewer1D` or
+        :class:`~hyperspy.viewer.viewer2d.Viewer2D` instance.
+    axes_manager :
+        The signal's :class:`~hyperspy.axes.AxesManager` (used to wire up
+        the navigation-index-changed event for iterating markers).
+    translate_fn :
+        Callable ``(marker, viewer) → str | None``.  Defaults to
+        :func:`_hs_marker_to_viewer1d`.
+    """
+
+    def __init__(self, marker, viewer, axes_manager=None,
+                 translate_fn=None) -> None:
+        self._marker = marker
+        self._viewer = viewer
+        self._axes_manager = axes_manager
+        self._translate_fn = translate_fn or _hs_marker_to_viewer1d
+        self._marker_id: str | None = None
+
+        self._push()
+
+        # For iterating markers, re-push on every navigation step.
+        # Also re-push when labels is a dynamic object array even if the
+        # marker positions themselves are static.
+        _labels_dynamic = (
+            isinstance(marker.labels, np.ndarray) and marker.labels.dtype == object
+        )
+        if (marker._is_iterating or _labels_dynamic) and axes_manager is not None:
+            axes_manager.events.indices_changed.connect(self._on_nav_changed, [])
+
+    # ------------------------------------------------------------------
+    def _push(self) -> None:
+        """Translate + (re-)push the marker to the viewer."""
+        mid = self._translate_fn(self._marker, self._viewer)
+        if mid is None:
+            return
+        if self._marker_id is not None:
+            try:
+                self._viewer.remove_marker(self._marker_id)
+            except (KeyError, AttributeError):
+                pass
+        self._marker_id = mid
+
+    def _on_nav_changed(self) -> None:
+        """Called when navigation indices change → refresh iterating markers."""
+        if self._viewer is None:
+            return
+        if self._marker_id is not None:
+            try:
+                self._viewer.remove_marker(self._marker_id)
+            except (KeyError, AttributeError):
+                pass
+            self._marker_id = None
+        self._push()
+
+    def close(self) -> None:
+        """Remove the viewer marker-set and disconnect event listeners."""
+        if self._axes_manager is not None:
+            try:
+                self._axes_manager.events.indices_changed.disconnect(
+                    self._on_nav_changed
+                )
+            except Exception:
+                pass
+        if self._viewer is not None and self._marker_id is not None:
+            try:
+                self._viewer.remove_marker(self._marker_id)
+            except (KeyError, AttributeError):
+                pass
+        self._viewer = None
+        self._marker_id = None
+
+
+# ---------------------------------------------------------------------------
 # Sentinel object used as the "figure" attribute so that is_active works
 # ---------------------------------------------------------------------------
 
@@ -70,7 +562,89 @@ class _SentinelFigure:
         def draw_idle() -> None:
             pass
 
+        supports_blit = False
+
     canvas = _Canvas()
+
+    def colorbar(self, *args, **kwargs):
+        """No-op — colorbars are not supported in the widget backend."""
+        return None
+
+
+class _SentinelTransform:
+    """Minimal stand-in for a matplotlib ``Transform``.
+
+    Returned by :class:`_WidgetAxSentinel` for ``transData``, ``transAxes``,
+    ``get_xaxis_transform()`` and ``get_yaxis_transform()`` so that
+    :meth:`~hyperspy.drawing.markers.Markers._get_transform` and
+    :meth:`~hyperspy.drawing.markers.Markers._initialize_collection` do not
+    raise when the widget backend is active.
+
+    All transformation methods are identity operations — the transform is
+    never actually applied because :meth:`_WidgetAxSentinel.add_collection`
+    is a no-op.
+    """
+
+    def transform(self, values):
+        return values
+
+    def transform_affine(self, values):
+        return values
+
+    def transform_non_affine(self, values):
+        return values
+
+    def inverted(self):
+        return self
+
+    # matplotlib checks ``transform.is_bbox`` on some code-paths
+    is_bbox = False
+    is_affine = True
+
+    def __add__(self, other):
+        return self
+
+    def __radd__(self, other):
+        return self
+
+
+class _WidgetAxSentinel:
+    """Minimal stand-in for a matplotlib ``Axes`` object.
+
+    Set as ``marker.ax`` so that :meth:`~hyperspy.drawing.markers.Markers.plot`
+    passes its ``self.ax is None`` guard without attempting any real matplotlib
+    drawing.  All methods that would draw to a canvas are no-ops.
+
+    All transform attributes and methods (``transData``, ``transAxes``,
+    ``get_xaxis_transform``, ``get_yaxis_transform``) return a
+    :class:`_SentinelTransform` so that
+    :meth:`~hyperspy.drawing.markers.Markers._get_transform` and
+    :meth:`~hyperspy.drawing.markers.Markers._initialize_collection` succeed
+    without raising ``AttributeError``.
+    """
+
+    def __init__(self, plot_obj) -> None:
+        self.figure = _SentinelFigure()
+        # hspy_fig is accessed by Markers._render_figure()
+        self.hspy_fig = plot_obj
+
+        # Transform sentinels — same keys as Markers._get_transform
+        _t = _SentinelTransform()
+        self.transData = _t
+        self.transAxes = _t
+
+    def get_xaxis_transform(self, which="grid"):
+        return _SentinelTransform()
+
+    def get_yaxis_transform(self, which="grid"):
+        return _SentinelTransform()
+
+    def add_collection(self, *args, **kwargs) -> None:
+        """No-op — markers are rendered by the widget backend."""
+        pass
+
+    def draw_artist(self, *args, **kwargs) -> None:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -81,14 +655,22 @@ class _WidgetPlotBase:
     """Common interface plumbing for widget-backed plot objects.
 
     Sub-classes must implement:
-    * :meth:`_build_viewer` — instantiate and return the viewer widget.
     * :meth:`update` — refresh the viewer from the current data.
+
+    Sub-classes may override:
+    * :attr:`_translate_fn` — callable ``(marker, viewer) → str | None``
+      used by :meth:`add_marker` to push HyperSpy ``Markers`` objects to the
+      viewer widget.  Defaults to :func:`_hs_marker_to_viewer1d`.
     """
+
+    # Override in subclasses that use a Viewer2D
+    _translate_fn = staticmethod(_hs_marker_to_viewer1d)
 
     def __init__(self, title: str = "") -> None:
         self._title = title
         self.ax = None          # Not meaningful for widget backend, kept for compat
         self.ax_markers: list = []
+        self._marker_bridges: list = []   # _HsMarkerBridge instances
         self.axes_manager = None
 
         # Use a sentinel so .figure is not None while open
@@ -126,23 +708,82 @@ class _WidgetPlotBase:
         self._title = str(value)
 
     # ------------------------------------------------------------------
-    # Marker compatibility (BlittedFigure interface)
+    # Marker support
     # ------------------------------------------------------------------
-    def add_marker(self, marker) -> None:  # type: ignore[override]
-        """Accept a HyperSpy marker object (silently ignored — markers
-        defined in metadata are not yet forwarded to the widget backend)."""
+    def add_marker(self, marker) -> None:
+        """Translate a HyperSpy ``Markers`` object and add it to the viewer.
+
+        The marker is translated into the native viewer marker API.  For
+        *iterating* markers the bridge re-pushes the translated set whenever
+        navigation indices change.
+
+        A :class:`_WidgetAxSentinel` is set as ``marker.ax`` so that the
+        subsequent ``marker.plot()`` call (issued by
+        :meth:`~hyperspy.signal.BaseSignal.add_marker`) does not raise and
+        silently absorbs the ``add_collection`` call.
+
+        Parameters
+        ----------
+        marker :
+            A :class:`~hyperspy.drawing.markers.Markers` instance.
+        """
+        # Give the marker a sentinel axes object so marker.plot() succeeds
+        # without attempting any real matplotlib drawing.
+        marker.ax = _WidgetAxSentinel(self)
         self.ax_markers.append(marker)
+        if self.viewer is None:
+            # Viewer not yet built; stored for deferred push after plot()
+            return
+        bridge = _HsMarkerBridge(marker, self.viewer, self.axes_manager,
+                                  translate_fn=self._translate_fn)
+        self._marker_bridges.append(bridge)
+        marker.events.closed.connect(
+            lambda obj, b=bridge: self._on_marker_closed(b), []
+        )
+
+    def _on_marker_closed(self, bridge: "_HsMarkerBridge") -> None:
+        bridge.close()
+        if bridge in self._marker_bridges:
+            self._marker_bridges.remove(bridge)
+
+    def _push_deferred_markers(self) -> None:
+        """Called after ``self.viewer`` is set to push any markers added
+        before the viewer was built (e.g. permanent markers plotted via
+        ``_plot_permanent_markers`` before ``show()`` completes)."""
+        if self.viewer is None:
+            return
+        for marker in list(self.ax_markers):
+            bridge = _HsMarkerBridge(marker, self.viewer, self.axes_manager,
+                                      translate_fn=self._translate_fn)
+            self._marker_bridges.append(bridge)
+            marker.events.closed.connect(
+                lambda obj, b=bridge: self._on_marker_closed(b), []
+            )
 
     def remove_markers(self, render_figure: bool = False) -> None:
-        """Remove all markers."""
+        """Remove all markers from the viewer."""
+        for bridge in list(self._marker_bridges):
+            bridge.close()
+        self._marker_bridges.clear()
         self.ax_markers.clear()
+
+    # ------------------------------------------------------------------
+    # render_figure — no-op (widget pushes state automatically via traitlets)
+    # ------------------------------------------------------------------
+    def render_figure(self) -> None:
+        """No-op — kept for API compatibility with ``BlittedFigure``."""
+        pass
 
     # ------------------------------------------------------------------
     # Close / lifecycle
     # ------------------------------------------------------------------
     def close(self) -> None:
-        """Mark the plot as closed and fire the ``events.closed`` event."""
+        """Tear down all marker bridges, mark the plot as closed, and fire
+        the ``events.closed`` event."""
         _logger.debug("Closing widget plot %r.", self)
+        for bridge in list(self._marker_bridges):
+            bridge.close()
+        self._marker_bridges.clear()
         self.figure = None
         self.events.closed.trigger(obj=self)
         for f in list(self.events.closed.connected):
@@ -155,11 +796,6 @@ class _WidgetPlotBase:
     def get_mpl_figure(self):
         return None
 
-    # ------------------------------------------------------------------
-    # render_figure — no-op (widget pushes diffs automatically via traitlets)
-    # ------------------------------------------------------------------
-    def render_figure(self) -> None:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +810,9 @@ class WidgetImagePlot(_WidgetPlotBase):
     :class:`~hyperspy.drawing.mpl_hie.MPL_HyperImage_Explorer` and
     :meth:`~hyperspy.signal.BaseSignal.plot` are implemented.
     """
+
+    # Use the 2-D translation function for all markers added to this plot
+    _translate_fn = staticmethod(_hs_marker_to_viewer2d)
 
     def __init__(self, title: str = "", **kwargs) -> None:
         super().__init__(title=title)
@@ -227,6 +866,9 @@ class WidgetImagePlot(_WidgetPlotBase):
 
         self.viewer = Viewer2D(data, x_axis=x_axis, y_axis=y_axis, units=units)
         self._current_data = data
+
+        # Push any markers that were added before the viewer was built
+        self._push_deferred_markers()
 
         # Display the widget
         self._display()
@@ -730,6 +1372,9 @@ class WidgetSignal1DFigure(_WidgetPlotBase):
                 lambda: self.axes_manager.events.indices_changed.disconnect(self.update),
                 [],
             )
+
+        # Push any markers that were added before the viewer was built
+        self._push_deferred_markers()
 
         self._display()
 

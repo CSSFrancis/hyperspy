@@ -34,7 +34,8 @@ class Squares(Markers):
     _position_key = "offsets"
 
     def __init__(
-        self, offsets, widths, angles=0, offset_transform="data", units="x", **kwargs
+        self, offsets, widths, angles=0, offset_transform="data", units="x",
+        label=None, labels=None, **kwargs
     ):
         """
         Initialize the set of square Markers.
@@ -45,6 +46,11 @@ class Squares(Markers):
         %s
         %s
         %s
+        label : str or None
+            Hover-tooltip shown for every square in this collection.
+        labels : list of str or None
+            Per-square hover-tooltips.  ``labels[i]`` is shown when hovering
+            square *i*.
         kwargs:
             Additional keyword arguments are passed to
             :class:`hyperspy.external.matplotlib.collections.SquareCollection`.
@@ -64,6 +70,8 @@ class Squares(Markers):
             angles=angles,
             offset_transform=offset_transform,
             units=units,
+            label=label,
+            labels=labels,
             **kwargs,
         )
 

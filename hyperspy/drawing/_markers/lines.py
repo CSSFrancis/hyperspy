@@ -26,7 +26,7 @@ class Lines(Markers):
 
     _position_key = "segments"
 
-    def __init__(self, segments, transform="data", **kwargs):
+    def __init__(self, segments, transform="data", label=None, labels=None, **kwargs):
         """Initialize the set of Segments Markers.
 
         Parameters
@@ -34,6 +34,11 @@ class Lines(Markers):
         segments : numpy.ndarray
             Must be with shape [n, 2, 2] ragged array with shape (n, 2, 3) at every navigation position.
             Defines the lines[[[x1,y1],[x2,y2]], ...] of the center of the ellipse.
+        label : str or None
+            Hover-tooltip shown for every line segment in this collection.
+        labels : list of str or None
+            Per-segment hover-tooltips.  ``labels[i]`` is shown when hovering
+            segment *i*.
         kwargs : dict
             Additional keyword arguments are passed to :class:`matplotlib.collections.LineCollection`.
 
@@ -53,5 +58,6 @@ class Lines(Markers):
             )
 
         super().__init__(
-            collection=LineCollection, segments=segments, transform=transform, **kwargs
+            collection=LineCollection, segments=segments, transform=transform,
+            label=label, labels=labels, **kwargs
         )

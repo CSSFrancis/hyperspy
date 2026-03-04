@@ -30,7 +30,7 @@ class VerticalLines(Markers):
     _position_key = "offsets"
     _position_key_to_set = "segments"
 
-    def __init__(self, offsets, **kwargs):
+    def __init__(self, offsets, label=None, labels=None, **kwargs):
         """
         Initialize the set of Vertical Line Markers.
 
@@ -38,10 +38,13 @@ class VerticalLines(Markers):
         ----------
         x: [n]
             Positions of the markers
+        label : str or None
+            Hover-tooltip shown for every line in this collection.
+        labels : list of str or None
+            Per-line hover-tooltips.  ``labels[i]`` is shown when hovering
+            line *i*.
         kwargs: dict
-            Keyword arguments passed to the underlying marker collection. Any argument
-            that is array-like and has `dtype=object` is assumed to be an iterating
-            argument and is treated as such.
+            Keyword arguments passed to the underlying marker collection.
 
         Examples
         --------
@@ -71,7 +74,7 @@ class VerticalLines(Markers):
                 "supported with the VerticalLines markers."
             )
 
-        super().__init__(collection=LineCollection, offsets=offsets, **kwargs)
+        super().__init__(collection=LineCollection, offsets=offsets, label=label, labels=labels, **kwargs)
 
     def get_current_kwargs(self, only_variable_length=False):
         kwargs = super().get_current_kwargs(only_variable_length=only_variable_length)

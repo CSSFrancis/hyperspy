@@ -40,6 +40,8 @@ class Ellipses(Markers):
         angles=0,
         offset_transform="data",
         units="xy",
+        label=None,
+        labels=None,
         **kwargs,
     ):
         """Initialize the set of Ellipse Markers.
@@ -51,6 +53,11 @@ class Ellipses(Markers):
         %s
         %s
         %s
+        label : str or None
+            Hover-tooltip shown for every ellipse in this collection.
+        labels : list of str or None
+            Per-ellipse hover-tooltips.  ``labels[i]`` is shown when hovering
+            ellipse *i*.
         kwargs:
             Additional keyword arguments are passed to :class:`matplotlib.collections.EllipseCollection`.
         """
@@ -69,6 +76,8 @@ class Ellipses(Markers):
             widths=widths,
             angles=angles,
             units=units,
+            label=label,
+            labels=labels,
             **kwargs,
         )
 

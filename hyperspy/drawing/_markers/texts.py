@@ -28,28 +28,29 @@ class Texts(Markers):
 
     _position_key = "offsets"
 
-    def __init__(self, offsets, offset_transform="data", transform="display", **kwargs):
+    def __init__(self, offsets, offset_transform="data", transform="display",
+                 label=None, labels=None, **kwargs):
         """
-        Initialize the set of Circle Markers.
+        Initialize the set of Text Markers.
 
         Parameters
         ----------
         %s
-        sizes : array-like
-            The size of the text in points.
-        facecolors : (list of) matplotlib color
-            Set the facecolor(s) of the markers. It can be a color
-            (all patches have same color), or a sequence of colors;
-            if it is a sequence the patches will cycle through the sequence.
-            If c is 'none', the patch will not be filled.
+        label : str or None
+            Hover-tooltip shown for every text in this collection.
+        labels : list of str or None
+            Per-text hover-tooltips.  ``labels[i]`` is shown when hovering
+            text *i*.
         kwargs : dict
-            Keyword arguments are passed to :class:`matplotlib.collections.CircleCollection`.
+            Keyword arguments are passed to the text collection.
         """
         super().__init__(
             collection=TextCollection,
             offsets=offsets,
             offset_transform=offset_transform,
             transform=transform,
+            label=label,
+            labels=labels,
             **kwargs,
         )
 

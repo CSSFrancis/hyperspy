@@ -108,7 +108,7 @@ class Viewer2D(anywidget.AnyWidget):
     display_max       = traitlets.Float(255.0).tag(sync=True)
     # 'linear' | 'log' | 'symlog'
     scale_mode        = traitlets.Unicode("linear").tag(sync=True)
-    histogram_visible = traitlets.Bool(True).tag(sync=True)
+    histogram_visible = traitlets.Bool(False).tag(sync=True)
     log_scale         = traitlets.Bool(False).tag(sync=True)
     show_colorbar     = traitlets.Bool(True).tag(sync=True)
     colorbar_width    = traitlets.Int(20).tag(sync=True)
@@ -569,24 +569,34 @@ class Viewer2D(anywidget.AnyWidget):
       }
 
       // ── draw image ─────────────────────────────────────────────────────────
-      function drawImage() {
-        const raw = model.get('image_bytes');
-        let bytes;
-        if (raw instanceof Uint8Array)                     bytes = raw;
-        else if (raw instanceof ArrayBuffer)               bytes = new Uint8Array(raw);
-        else if (raw && raw.buffer instanceof ArrayBuffer) bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-        else                                               bytes = new Uint8Array(0);
+      //
+      // Two-tier rendering pipeline:
+      //
+      //  Tier 0 – pan/zoom-only redraw
+      //    The RGBA bitmap from the previous full render is cached in
+      //    `_cachedBitmap` (an OffscreenCanvas).  If only zoom/center_x/
+      //    center_y changed we just re-crop+scale the bitmap to canvas size
+      //    using createImageBitmap — O(canvas pixels), not O(image pixels).
+      //
+      //  Tier 1 – CPU pixel loop
+      //    Build a flat Uint32 RGBA LUT (256 entries, one 32-bit write per
+      //    pixel) and blit the remapped image into an OffscreenCanvas.
 
-        const iw = model.get('image_width'),  ih = model.get('image_height');
-        const cw = parseInt(imageCanvas.style.width)  || model.get('viewer_width');
-        const ch = parseInt(imageCanvas.style.height) || model.get('viewer_height');
+      // Cache keys / objects
+      let _cachedBitmap   = null;   // OffscreenCanvas  (full image, LUT-applied)
+      let _cachedBitmapW  = 0;
+      let _cachedBitmapH  = 0;
+      let _cachedBytesKey = null;   // model.get('image_bytes') reference
+      let _cachedLutKey   = null;   // serialised LUT key string
 
-        imgCtx.clearRect(0, 0, cw, ch);
-        if (bytes.length === 0) return;
+      // Suppress kernel-echo redraws while wheel/pan is actively running.
+      // Set to true when we call model.set() locally; cleared in the RAF
+      // commit callback after save_changes() so incoming change events from
+      // the kernel echo don't fire a redundant drawImage.
+      let _localOnly = false;
 
-        imgCtx.imageSmoothingEnabled = false;
-
-        // ── intensity LUT: raw uint8 → remapped uint8 [0,255] ───────────────
+      // Build a flat Uint32 LUT: index = raw uint8 → packed RGBA uint32
+      function _buildLut32() {
         const dMin  = model.get('display_min');
         const dMax  = model.get('display_max');
         const hMin  = model.get('hist_min');
@@ -594,7 +604,25 @@ class Viewer2D(anywidget.AnyWidget):
         const mode  = model.get('scale_mode');
         const range = hMax - hMin || 1;
 
-        const intensityLut = new Uint8Array(256);
+        let cmapFlat;   // Uint8Array length 256*4 (RGBA), or null for greyscale
+        try {
+          const parsed = JSON.parse(model.get('colormap_data'));
+          if (Array.isArray(parsed) && parsed.length === 256) {
+            cmapFlat = new Uint8Array(256 * 4);
+            for (let i = 0; i < 256; i++) {
+              cmapFlat[i*4]   = parsed[i][0];
+              cmapFlat[i*4+1] = parsed[i][1];
+              cmapFlat[i*4+2] = parsed[i][2];
+              cmapFlat[i*4+3] = 255;
+            }
+          }
+        } catch (_) {}
+
+        const lut = new Uint32Array(256);
+        const buf = new ArrayBuffer(4);
+        const dv  = new DataView(buf);
+        const u32 = new Uint32Array(buf);
+
         for (let raw8 = 0; raw8 < 256; raw8++) {
           const val = hMin + (raw8 / 255) * range;
           let t;
@@ -611,52 +639,104 @@ class Viewer2D(anywidget.AnyWidget):
           } else {
             t = (val - dMin) / ((dMax - dMin) || 1);
           }
-          intensityLut[raw8] = Math.max(0, Math.min(255, Math.round(t * 255)));
-        }
-
-        // ── colormap LUT: uint8 [0,255] → [r, g, b] ─────────────────────────
-        let cmapData;
-        try { cmapData = JSON.parse(model.get('colormap_data')); } catch (_) { cmapData = []; }
-        const hasCmap = Array.isArray(cmapData) && cmapData.length === 256;
-
-        // ── build RGBA image ─────────────────────────────────────────────────
-        const imageData = imgCtx.createImageData(iw, ih);
-        for (let i = 0; i < bytes.length; i++) {
-          const mapped = intensityLut[bytes[i]];
-          const base   = i * 4;
-          if (hasCmap) {
-            imageData.data[base]     = cmapData[mapped][0];
-            imageData.data[base + 1] = cmapData[mapped][1];
-            imageData.data[base + 2] = cmapData[mapped][2];
+          const idx = Math.max(0, Math.min(255, Math.round(t * 255)));
+          if (cmapFlat) {
+            dv.setUint8(0, cmapFlat[idx*4]);
+            dv.setUint8(1, cmapFlat[idx*4+1]);
+            dv.setUint8(2, cmapFlat[idx*4+2]);
+            dv.setUint8(3, 255);
           } else {
-            imageData.data[base]     = mapped;
-            imageData.data[base + 1] = mapped;
-            imageData.data[base + 2] = mapped;
+            dv.setUint8(0, idx); dv.setUint8(1, idx);
+            dv.setUint8(2, idx); dv.setUint8(3, 255);
           }
-          imageData.data[base + 3] = 255;
+          lut[raw8] = u32[0];
         }
+        return lut;
+      }
 
-        const tmp = document.createElement('canvas');
-        tmp.width = iw; tmp.height = ih;
-        tmp.getContext('2d').putImageData(imageData, 0, 0);
+      // Serialise enough state to detect when the LUT needs rebuilding
+      function _lutKey() {
+        return [model.get('display_min'), model.get('display_max'),
+                model.get('hist_min'),    model.get('hist_max'),
+                model.get('scale_mode'),  model.get('colormap_name')].join('|');
+      }
 
+      // Apply LUT on the CPU — one 32-bit write per pixel
+      function _applyLutCpu(bytes, lut32, iw, ih) {
+        const n       = iw * ih;
+        const imgData = new ImageData(iw, ih);
+        const out32   = new Uint32Array(imgData.data.buffer);
+        for (let i = 0; i < n; i++) out32[i] = lut32[bytes[i]];
+        const oc = new OffscreenCanvas(iw, ih);
+        oc.getContext('2d').putImageData(imgData, 0, 0);
+        return oc;
+      }
+
+      // _blitBitmap: draw the cached OffscreenCanvas with current zoom/pan
+      function _blitBitmap(bitmap, iw, ih) {
+        const cw = parseInt(imageCanvas.style.width)  || model.get('viewer_width');
+        const ch = parseInt(imageCanvas.style.height) || model.get('viewer_height');
         const zoom = model.get('zoom');
         const cx   = model.get('center_x'), cy = model.get('center_y');
+
+        imgCtx.clearRect(0, 0, cw, ch);
+        imgCtx.imageSmoothingEnabled = false;
+
         if (zoom >= 1.0) {
           const visW = iw / zoom, visH = ih / zoom;
           const srcX = Math.max(0, Math.min(iw - visW, cx * iw - visW / 2));
           const srcY = Math.max(0, Math.min(ih - visH, cy * ih - visH / 2));
-          imgCtx.drawImage(tmp, srcX, srcY, visW, visH, 0, 0, cw, ch);
+          imgCtx.drawImage(bitmap, srcX, srcY, visW, visH, 0, 0, cw, ch);
         } else {
           const dstW = cw * zoom, dstH = ch * zoom;
           imgCtx.fillStyle = theme.bgCanvas;
           imgCtx.fillRect(0, 0, cw, ch);
-          imgCtx.drawImage(tmp, 0, 0, iw, ih, (cw - dstW) / 2, (ch - dstH) / 2, dstW, dstH);
+          imgCtx.drawImage(bitmap, 0, 0, iw, ih, (cw - dstW) / 2, (ch - dstH) / 2, dstW, dstH);
         }
 
         if (model.get('use_scalebar')) drawScaleBar(); else drawAxes();
         drawOverlay();
         drawMarkers();
+      }
+
+      // Main entry point — called on every model change that affects the image
+      function drawImage() {
+        const raw = model.get('image_bytes');
+        let bytes;
+        if (raw instanceof Uint8Array)                     bytes = raw;
+        else if (raw instanceof ArrayBuffer)               bytes = new Uint8Array(raw);
+        else if (raw && raw.buffer instanceof ArrayBuffer) bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+        else                                               bytes = new Uint8Array(0);
+
+        const iw = model.get('image_width'),  ih = model.get('image_height');
+
+        if (bytes.length === 0) {
+          const cw = parseInt(imageCanvas.style.width)  || model.get('viewer_width');
+          const ch = parseInt(imageCanvas.style.height) || model.get('viewer_height');
+          imgCtx.clearRect(0, 0, cw, ch);
+          return;
+        }
+
+        const lutKey  = _lutKey();
+        const needsRebuild = (bytes !== _cachedBytesKey) ||
+                             (lutKey !== _cachedLutKey)   ||
+                             (_cachedBitmap === null)     ||
+                             (_cachedBitmapW !== iw || _cachedBitmapH !== ih);
+
+        if (!needsRebuild && _cachedBitmap) {
+          // Tier 0: bitmap is up to date — just re-crop+blit
+          _blitBitmap(_cachedBitmap, iw, ih);
+          return;
+        }
+
+        // Tier 1: rebuild bitmap then blit
+        const lut32 = _buildLut32();
+        _cachedLutKey   = lutKey;
+        _cachedBytesKey = bytes;
+        _cachedBitmapW  = iw;
+        _cachedBitmapH  = ih;
+        _cachedBitmap   = _applyLutCpu(bytes, lut32, iw, ih);
+        _blitBitmap(_cachedBitmap, iw, ih);
       }
 
       // ── histogram ──────────────────────────────────────────────────────────
@@ -1514,9 +1594,11 @@ class Viewer2D(anywidget.AnyWidget):
         } else if (isPanning) {
           const rect = imageCanvas.getBoundingClientRect();
           const z = model.get('zoom');
+          _localOnly = true;
           model.set('center_x', Math.max(0, Math.min(1, panStartCenterX - (e.clientX - panStartX) / rect.width  / z)));
           model.set('center_y', Math.max(0, Math.min(1, panStartCenterY - (e.clientY - panStartY) / rect.height / z)));
-          model.save_changes();
+          drawImage();   // immediate local redraw
+          _scheduleCommit();
           e.preventDefault();
         }
       });
@@ -1551,6 +1633,27 @@ class Viewer2D(anywidget.AnyWidget):
 
       imageCanvas.addEventListener('mouseenter', () => imageCanvas.focus());
 
+      // ── viewport commit throttle ───────────────────────────────────────────
+      // Wheel and pan events fire far faster than the kernel can process them.
+      // _localOnly = true while we are making local model.set() calls and
+      // waiting for the RAF commit.  The change: listeners for zoom/center
+      // skip their drawImage call when _localOnly is set — the wheel/pan
+      // handler already called drawImage directly, and we don't want the
+      // kernel echo to cause a second redundant draw.
+      let _commitPending = false;
+      function _scheduleCommit() {
+        if (_commitPending) return;
+        _commitPending = true;
+        requestAnimationFrame(() => {
+          _commitPending = false;
+          _localOnly = true;
+          model.save_changes();
+          // Clear _localOnly after a short delay to let the echo settle,
+          // but not so long that a real Python-pushed update gets suppressed.
+          setTimeout(() => { _localOnly = false; }, 200);
+        });
+      }
+
       // ── wheel zoom ─────────────────────────────────────────────────────────
       imageCanvas.addEventListener('wheel', (e) => {
         e.preventDefault();
@@ -1560,10 +1663,12 @@ class Viewer2D(anywidget.AnyWidget):
         const curZ = model.get('zoom');
         const newZ = Math.max(0.75, Math.min(100, curZ * (e.deltaY > 0 ? 0.9 : 1.1)));
         const ratio = curZ / newZ;
+        _localOnly = true;
         model.set('zoom', newZ);
         model.set('center_x', Math.max(0, Math.min(1, model.get('center_x') + (mx - 0.5) * (1 - ratio) / newZ)));
         model.set('center_y', Math.max(0, Math.min(1, model.get('center_y') + (my - 0.5) * (1 - ratio) / newZ)));
-        model.save_changes();
+        drawImage();   // immediate local redraw — no round-trip
+        _scheduleCommit();
       });
 
       // ── keyboard shortcuts ─────────────────────────────────────────────────
@@ -1854,11 +1959,9 @@ class Viewer2D(anywidget.AnyWidget):
         if (curW === w && curH === h) return;
         syncCanvasSizes(); drawImage(); drawHistogram();
       });
-      model.on('change:zoom', () => {
-        drawImage();
-      });
-      model.on('change:center_x', drawImage);
-      model.on('change:center_y', drawImage);
+      model.on('change:zoom',     () => { if (!_localOnly) drawImage(); });
+      model.on('change:center_x', () => { if (!_localOnly) drawImage(); });
+      model.on('change:center_y', () => { if (!_localOnly) drawImage(); });
       model.on('change:scale_x',  drawScaleBar);
       model.on('change:units',    () => { drawScaleBar(); if (!model.get('use_scalebar')) drawAxes(); });
       model.on('change:overlay_widgets', drawOverlay);
@@ -1875,6 +1978,41 @@ class Viewer2D(anywidget.AnyWidget):
     """
 
     # ------------------------------------------------------------------ Python
+    @staticmethod
+    def _normalize(data: np.ndarray) -> tuple[np.ndarray, float, float]:
+        """Normalize *data* to uint8, reusing a single float64 buffer.
+
+        Uses ``out=`` throughout to avoid intermediate temporaries.
+
+        Returns
+        -------
+        img_u8 : np.ndarray  uint8 (H, W)
+        vmin   : float
+        vmax   : float
+        """
+        img = data.astype(np.float64, copy=False)
+        vmin = float(np.nanmin(img))
+        vmax = float(np.nanmax(img))
+        if vmax > vmin:
+            # (img - vmin) / (vmax - vmin) * 255  — all in-place
+            buf = np.empty_like(img)
+            np.subtract(img, vmin, out=buf)
+            np.divide(buf, vmax - vmin, out=buf)
+            np.multiply(buf, 255.0, out=buf)
+            img_u8 = buf.astype(np.uint8)
+        else:
+            img_u8 = np.zeros(data.shape, dtype=np.uint8)
+        return img_u8, vmin, vmax
+
+    @staticmethod
+    def _compute_histogram(img_u8: np.ndarray, vmin: float, vmax: float) -> str:
+        """Compute histogram of *img_u8* and return as JSON string."""
+        counts, edges = np.histogram(img_u8.ravel(), bins=256,
+                                     range=(0, 255))
+        # Map bin edges back to data values
+        bin_centers = vmin + (edges[:-1] + edges[1:]) / 2 / 255.0 * (vmax - vmin)
+        return json.dumps({"bins": bin_centers.tolist(), "counts": counts.tolist()})
+
     def __init__(
         self,
         data: np.ndarray,
@@ -1919,21 +2057,20 @@ class Viewer2D(anywidget.AnyWidget):
         equal = _equal_scale(x_axis, y_axis)
         dx = (x_axis[-1] - x_axis[0]) / (len(x_axis) - 1) if len(x_axis) > 1 else 1.0
 
-        img = data.astype(float)
-        vmin, vmax = np.nanmin(img), np.nanmax(img)
-        if vmax > vmin:
-            img_u8 = ((img - vmin) / (vmax - vmin) * 255).astype(np.uint8)
-        else:
-            img_u8 = np.zeros_like(img, dtype=np.uint8)
+        img_u8, vmin, vmax = self._normalize(data)
 
-        counts, edges = np.histogram(data.flatten(), bins=256)
-        bin_centers = (edges[:-1] + edges[1:]) / 2
-        histogram_json = json.dumps(
-            {
-                "bins": bin_centers.tolist(),
-                "counts": counts.tolist(),
-            }
-        )
+        # Store uint8 array for lazy histogram computation when panel is shown.
+        self._raw_u8 = img_u8
+        self._raw_vmin = vmin
+        self._raw_vmax = vmax
+
+        # Only compute the histogram now if the panel is already visible
+        # (default: hidden).  When the user toggles it on, the observe
+        # callback below computes and pushes it on demand.
+        if self.histogram_visible:
+            histogram_json = self._compute_histogram(img_u8, vmin, vmax)
+        else:
+            histogram_json = '{"bins":[],"counts":[]}'
 
         aspect = w / h if h > 0 else 1.0
         if aspect >= 1.0:
@@ -1961,6 +2098,19 @@ class Viewer2D(anywidget.AnyWidget):
             self.scale_mode = "linear"
             self.colormap_name = "gray"
             self.colormap_data = json.dumps(self._build_colormap_lut("gray"))
+
+    @traitlets.observe("histogram_visible")
+    def _on_histogram_visible(self, change: dict) -> None:
+        """Lazily compute and push histogram data the first time it is shown."""
+        if not change["new"]:
+            return
+        # Only compute if we haven't already (bins list is empty)
+        current = json.loads(self.histogram_data)
+        if not current.get("bins"):
+            if hasattr(self, "_raw_u8") and self._raw_u8 is not None:
+                self.histogram_data = self._compute_histogram(
+                    self._raw_u8, self._raw_vmin, self._raw_vmax
+                )
 
     # ------------------------------------------------------------------
     def _to_png_bytes(self) -> bytes:
@@ -2051,18 +2201,18 @@ class Viewer2D(anywidget.AnyWidget):
         dx = float(np.median(np.diff(x_axis))) if len(x_axis) > 1 else 1.0
         dy = float(np.median(np.diff(y_axis))) if len(y_axis) > 1 else 1.0
 
-        img = data.astype(float)
-        vmin, vmax = np.nanmin(img), np.nanmax(img)
-        if vmax > vmin:
-            img_u8 = ((img - vmin) / (vmax - vmin) * 255).astype(np.uint8)
-        else:
-            img_u8 = np.zeros_like(img, dtype=np.uint8)
+        img_u8, vmin, vmax = self._normalize(data)
 
-        counts, edges = np.histogram(data.flatten(), bins=256)
-        bin_centers = (edges[:-1] + edges[1:]) / 2
-        histogram_json = json.dumps(
-            {"bins": bin_centers.tolist(), "counts": counts.tolist()}
-        )
+        # Refresh the cached uint8 array for lazy histogram.
+        self._raw_u8   = img_u8
+        self._raw_vmin = vmin
+        self._raw_vmax = vmax
+
+        if self.histogram_visible:
+            histogram_json = self._compute_histogram(img_u8, vmin, vmax)
+        else:
+            # Clear so _on_histogram_visible recomputes next time it is shown.
+            histogram_json = '{"bins":[],"counts":[]}'
 
         with self.hold_trait_notifications():
             self.image_bytes    = img_u8.tobytes()
@@ -2078,7 +2228,6 @@ class Viewer2D(anywidget.AnyWidget):
             self.hist_max       = float(vmax)
             self.display_min    = float(vmin)
             self.display_max    = float(vmax)
-            # Re-apply the current colormap to match the new data range.
             self.colormap_data  = json.dumps(
                 self._build_colormap_lut(self.colormap_name)
             )

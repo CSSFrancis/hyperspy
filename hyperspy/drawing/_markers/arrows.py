@@ -27,7 +27,8 @@ class Arrows(Markers):
     _position_key = "offsets"
 
     def __init__(
-        self, offsets, U, V, C=None, scale=1, angles="xy", scale_units="xy", **kwargs
+        self, offsets, U, V, C=None, scale=1, angles="xy", scale_units="xy",
+        label=None, labels=None, **kwargs
     ):
         """
         Initialize the set of Arrows Markers.
@@ -40,17 +41,23 @@ class Arrows(Markers):
         V : array-like
             The change in y (vertical) diraction for the arrows.
         C : array-like or None
+        label : str or None
+            Hover-tooltip shown for every arrow in this collection.
+        labels : list of str or None
+            Per-arrow hover-tooltips.  ``labels[i]`` is shown when hovering
+            arrow *i*.
         kwargs : dict
             Keyword arguments are passed to :class:`matplotlib.quiver.Quiver`.
         """
 
         super().__init__(
             collection=Quiver,
-            # iterating arguments
             offsets=offsets,
             U=U,
             V=V,
             C=C,
+            label=label,
+            labels=labels,
             **kwargs,
         )
         self._init_kwargs = dict(scale=scale, angles=angles, scale_units=scale_units)

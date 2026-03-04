@@ -40,6 +40,8 @@ class Rectangles(Markers):
         angles=0,
         offset_transform="data",
         units="xy",
+        label=None,
+        labels=None,
         **kwargs,
     ):
         """Initialize the set of Segments Markers.
@@ -51,6 +53,11 @@ class Rectangles(Markers):
         %s
         %s
         %s
+        label : str or None
+            Hover-tooltip shown for every rectangle in this collection.
+        labels : list of str or None
+            Per-rectangle hover-tooltips.  ``labels[i]`` is shown when hovering
+            rectangle *i*.
         kwargs:
             Additional keyword arguments are passed to
             :class:`hyperspy.external.matplotlib.collections.RectangleCollection`.
@@ -71,6 +78,8 @@ class Rectangles(Markers):
             angles=angles,
             offset_transform=offset_transform,
             units=units,
+            label=label,
+            labels=labels,
             **kwargs,
         )
 

@@ -28,7 +28,8 @@ class Points(Markers):
     _position_key = "offsets"
 
     def __init__(
-        self, offsets, sizes=10, offset_transform="data", units="points", **kwargs
+        self, offsets, sizes=10, offset_transform="data", units="points",
+        label=None, labels=None, **kwargs
     ):
         """Initialize the set of points Markers.
 
@@ -38,6 +39,11 @@ class Points(Markers):
         sizes : int, float or array_like, optional
             The size of the markers in display coordinate system.
         %s
+        label : str or None
+            Hover-tooltip shown for every point in this collection.
+        labels : list of str or None
+            Per-point hover-tooltips.  ``labels[i]`` is shown when hovering
+            point *i*.
         kwargs : dict
             Keyword arguments are passed to :class:`matplotlib.collections.CircleCollection`
         """
@@ -55,6 +61,8 @@ class Points(Markers):
             sizes=sizes,
             offset_transform=offset_transform,
             units=units,
+            label=label,
+            labels=labels,
             **kwargs,
         )
 
