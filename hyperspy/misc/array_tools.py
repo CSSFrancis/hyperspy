@@ -18,6 +18,7 @@
 import logging
 import math
 
+import dask
 import dask.array as da
 import numpy as np
 
@@ -886,6 +887,27 @@ class CachedDaskArray:
         except ValueError:
             return None
 
+    def cancel_surrounding(self):
+        """Cancel pending surrounding-block futures.
+
+        Called when the user moves to a new nav position so that stale
+        low-priority prefetch tasks don't occupy workers needed for the
+        new core block load.
+        """
+        client = self.client
+        if client is None:
+            return
+        try:
+            from dask.distributed import Future as _Future
+            for f in self.surrounding_cached_blocks:
+                if isinstance(f, _Future) and not f.done():
+                    try:
+                        client.cancel(f, force=False)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     def get_index(
         self,
         indices,
@@ -1014,10 +1036,16 @@ class CachedDaskArray:
         ]
 
         if self.client is not None:
-            new_core_blocks_to_add = self.client.compute(new_core_blocks)
+            # Core block (current position) gets high priority so it runs before
+            # surrounding prefetch blocks and before stale tasks from prior positions.
+            with dask.annotate(priority=5):
+                new_core_blocks_to_add = self.client.compute(new_core_blocks)
             self.core_cached_blocks.extend(new_core_blocks_to_add)
             self.core_cached_block_inds.extend(to_compute_core_inds)
-            new_surrounding_blocks_to_add = self.client.compute(new_surrounding_blocks)
+            # Surrounding blocks get low priority — they are prefetch and should
+            # yield to any new core-block request that arrives while they are queued.
+            with dask.annotate(priority=-5):
+                new_surrounding_blocks_to_add = self.client.compute(new_surrounding_blocks)
             self.surrounding_cached_blocks.extend(new_surrounding_blocks_to_add)
             self.surrounding_cached_block_inds.extend(to_compute_surrounding_inds)
         else:  # compute everything...
@@ -1041,6 +1069,7 @@ class CachedDaskArray:
                         self.core_cached_blocks[b_ind],
                         slices,
                         sum_data=sum_data,
+                        priority=5,  # high priority: unblocks the plot
                         **kwargs,
                     )
                 )
@@ -1048,7 +1077,9 @@ class CachedDaskArray:
                 future = results[0] # ignore weighted mean for a single result
             else:
                 future = self.client.submit(
-                        weighted_mean_round_from_sums, results, self.array.dtype, **kwargs
+                        weighted_mean_round_from_sums, results, self.array.dtype,
+                        priority=5,
+                        **kwargs,
                     )
             if return_future:
                 return future
