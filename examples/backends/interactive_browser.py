@@ -77,12 +77,17 @@ s.metadata.General.title = "Synthetic EELS spectrum image"
 # drift visible as you navigate the map.
 
 peak_centres = 2.0 + np.arange(nav_x) * 0.4   # centre varies with x only
-# Broadcast to (nav_y, nav_x) navigation shape, scalar in signal dim
-centres_nav = np.broadcast_to(peak_centres[np.newaxis, :], (nav_y, nav_x))
+
+# Navigating markers need a dtype=object array with navigation_shape,
+# where each element is an array of line positions for that nav coordinate.
+offsets_vlines = np.empty((nav_y, nav_x), dtype=object)
+for iy in range(nav_y):
+    for ix in range(nav_x):
+        offsets_vlines[iy, ix] = np.array([peak_centres[ix]])
 
 vlines = hs.plot.markers.VerticalLines(
-    offsets=centres_nav[:, :, np.newaxis],   # shape (nav_y, nav_x, 1)
-    colors="rgba(255, 100, 0, 0.7)",
+    offsets=offsets_vlines,
+    colors="#FF6400B3",  # orange with ~70% opacity (works in both mpl and anyplotlib)
     linewidths=1.5,
 )
 s.add_marker(vlines, permanent=True)
@@ -98,6 +103,11 @@ try:
     import anyplotlib  # noqa: F401
     hs.preferences.Plot.backend = "anyplotlib"
     s.plot()
+    # Expose the combined figure widget for the gallery scraper.
+    # The "# Interactive" tag tells AnywidgetScraper to embed the full Python
+    # source so the Pyodide bridge can re-run the example live in the browser.
+    _apl_fig = s._plot.signal_plot.figure
+    _apl_fig = getattr(_apl_fig, "_real_fig", _apl_fig)  # Interactive
     hs.preferences.Plot.backend = "matplotlib"
 except ImportError:
     print("anyplotlib not installed — skipping WebGL plot.  "

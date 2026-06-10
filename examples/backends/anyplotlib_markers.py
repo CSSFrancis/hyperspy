@@ -43,10 +43,15 @@ s.axes_manager[1].offset = x[0]
 
 # %%
 # Add a vertical-line marker that tracks the peak centre for each position.
-# The marker data has shape (nx,) in navigation and is a scalar in signal.
+# Navigating markers require a dtype=object array with navigation_shape,
+# where each element is an array of positions for that nav coordinate.
+
+offsets_vlines = np.empty(nx, dtype=object)
+for i in range(nx):
+    offsets_vlines[i] = np.array([centres[i]])
 
 vlines = hs.plot.markers.VerticalLines(
-    offsets=centres[:, np.newaxis],   # shape (nav, 1)
+    offsets=offsets_vlines,
     colors="crimson",
     linewidths=1.5,
 )
@@ -55,11 +60,12 @@ s.add_marker(vlines, permanent=True)
 # %%
 # Add point markers at the peak maxima.
 
-peak_x = centres                                # energy coordinate
-peak_y = np.ones(nx)                            # intensity ≈ 1 at peak
+offsets_points = np.empty(nx, dtype=object)
+for i in range(nx):
+    offsets_points[i] = np.array([[centres[i], 1.0]])  # shape (1, 2): one point (x, y)
 
 points = hs.plot.markers.Points(
-    offsets=np.stack([peak_x, peak_y], axis=1)[:, np.newaxis, :],
+    offsets=offsets_points,
     color="gold",
     sizes=30,
 )
@@ -72,6 +78,9 @@ try:
     import anyplotlib  # noqa: F401
     hs.preferences.Plot.backend = "anyplotlib"
     s.plot()
+    # Expose figure for gallery scraper.
+    _apl_fig = s._plot.signal_plot.figure
+    _apl_fig = getattr(_apl_fig, "_real_fig", _apl_fig)
     hs.preferences.Plot.backend = "matplotlib"
 except ImportError:
     print("anyplotlib not installed — skipping WebGL plot.  "

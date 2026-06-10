@@ -180,7 +180,7 @@ class MinimalDemoBackend(StubBackend):
 # Register in-process.  The name "demo" will now be accepted by
 # ``hs.preferences.Plot.backend = "demo"``.
 
-register_backend("demo", MinimalDemoBackend)
+register_backend(MinimalDemoBackend())
 
 print("Registered backends:", end=" ")
 try:

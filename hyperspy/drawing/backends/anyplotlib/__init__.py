@@ -25,6 +25,16 @@ def _unwrap_cycling(value):
     return value
 
 
+def _chain(fn1, fn2):
+    """Return a callable that calls fn1() then fn2()."""
+
+    def _combined():
+        fn1()
+        fn2()
+
+    return _combined
+
+
 class _AplFigureProxy:
     """Proxy for a single axes panel within a shared anyplotlib Figure.
 
@@ -51,11 +61,22 @@ class AnyplotlibBackend:
     def create_figure(self, title=None, on_close=None, **kwargs):
         import anyplotlib as apl
 
+        # Pop the MPL-style window-close callback so it doesn't reach apl.subplots.
+        # We store it on the figure object and invoke it from close_figure(),
+        # giving anyplotlib figures the same semantics as MPL close callbacks.
+        window_close = kwargs.pop("_on_figure_window_close", None)
+
         # If a pre-created panel proxy is passed, adopt it (combined layout).
         fig_kwarg = kwargs.pop("fig", None)
         if isinstance(fig_kwarg, _AplFigureProxy):
             if on_close is not None:
                 fig_kwarg._hspy_on_close = on_close
+            if window_close is not None:
+                # Store additionally so close_figure fires it too.
+                existing = getattr(fig_kwarg, "_hspy_window_close", None)
+                fig_kwarg._hspy_window_close = (
+                    window_close if existing is None else _chain(existing, window_close)
+                )
             return fig_kwarg
 
         figsize = kwargs.pop("figsize", (640, 480))
@@ -70,28 +91,38 @@ class AnyplotlibBackend:
         ax.figure = fig  # hyperspy widgets use ax.figure to reach the figure
         if on_close is not None:
             fig._hspy_on_close = on_close
+        if window_close is not None:
+            fig._hspy_window_close = window_close
         return fig
 
     def close_figure(self, fig):
         if fig is None:
             return
         if isinstance(fig, _AplFigureProxy):
-            # Proxy: call close callback but don't close the shared real figure.
+            # Proxy: fire close callbacks but don't close the shared real figure.
             on_close = fig._hspy_on_close
+            window_close = getattr(fig, "_hspy_window_close", None)
             fig._hspy_on_close = None
+            fig._hspy_window_close = None
             if on_close is not None:
                 on_close()
+            if window_close is not None:
+                window_close()
             return
         # Clear before calling to prevent re-entrant close loop:
         # BlittedFigure stores on_close=self.close which calls close_figure again.
         on_close = getattr(fig, "_hspy_on_close", None)
+        window_close = getattr(fig, "_hspy_window_close", None)
         fig._hspy_on_close = None
+        fig._hspy_window_close = None
         try:
             fig.close()
         except Exception:
             pass
         if on_close is not None:
             on_close()
+        if window_close is not None:
+            window_close()
 
     def create_combined_figure_panels(self, figsize=None):
         """Create a 2-panel anyplotlib Figure; return (nav_proxy, signal_proxy).
@@ -306,7 +337,19 @@ class AnyplotlibBackend:
         pass  # primary Plot1D cannot be individually removed from its panel
 
     def set_line_props(self, handle, **props):
-        pass  # anyplotlib does not expose per-property setters on Plot1D yet
+        # Map the subset of MPL-style props that anyplotlib Plot1D supports.
+        _prop_map = {
+            "color": "color",
+            "linewidth": "linewidth",
+            "linestyle": "linestyle",
+            "alpha": "alpha",
+        }
+        for mpl_key, apl_key in _prop_map.items():
+            if mpl_key in props and hasattr(handle, apl_key):
+                try:
+                    setattr(handle, apl_key, props[mpl_key])
+                except (AttributeError, TypeError):
+                    pass
 
     def line_get_xdata(self, handle):
         return handle.x
@@ -320,19 +363,55 @@ class AnyplotlibBackend:
     # ── Text annotations ─────────────────────────────────────────────────
 
     def add_text(self, ax, x, y, s, transform="axes", **kwargs):
-        return None  # text annotations not yet supported; callers check for None
+        plot = self._primary_plot(ax)
+        if plot is not None and hasattr(plot, "add_text"):
+            # anyplotlib Plot2D/Plot1D exposes add_text when available.
+            color = kwargs.get("color", "white")
+            try:
+                handle = plot.add_text(x, y, s, color=color)
+                return handle
+            except (TypeError, AttributeError):
+                pass
+        # Fall back to a lightweight sentinel that remembers the text content
+        # and colour so that update_text / text_get_color work correctly even
+        # without native text support.
+        return _AplTextHandle(s, kwargs.get("color", "white"))
 
     def update_text(self, handle, s):
-        pass  # no-op when handle is None
+        if handle is None:
+            return
+        if isinstance(handle, _AplTextHandle):
+            handle.s = s
+        elif hasattr(handle, "set_text"):
+            handle.set_text(s)
 
     def remove_text(self, ax, handle):
-        pass  # no-op when handle is None
+        if handle is None:
+            return
+        if isinstance(handle, _AplTextHandle):
+            return  # sentinel — nothing to remove from the canvas
+        try:
+            handle.remove()
+        except Exception:
+            pass
 
     def text_set_color(self, handle, color):
-        pass  # no-op; text not yet supported
+        if handle is None:
+            return
+        if isinstance(handle, _AplTextHandle):
+            handle.color = color
+        elif hasattr(handle, "set_color"):
+            try:
+                handle.set_color(color)
+            except Exception:
+                pass
 
     def text_get_color(self, handle):
-        return "white"  # default scalebar colour
+        if handle is None:
+            return "white"
+        if isinstance(handle, _AplTextHandle):
+            return handle.color
+        return getattr(handle, "color", "white")
 
     # ── Generic artist ────────────────────────────────────────────────────
 
@@ -814,16 +893,21 @@ class AnyplotlibBackend:
         raise ValueError(f"Plotting is not supported for signal_dim={signal_dim}.")
 
     def create_signal1d_figure(self, title="", on_close=None, **kwargs):
-        # Fall back to the MPL-based figure until anyplotlib has its own.
         from hyperspy.drawing.signal1d import Signal1DFigure
 
-        return Signal1DFigure(title=title, _on_figure_window_close=on_close, **kwargs)
+        sf = Signal1DFigure(title=title, **kwargs)
+        # Wire the explorer-level close via events so it fires when the
+        # BlittedFigure closes, regardless of whether the backend supports
+        # a native window-close callback (connect_close_event is a no-op here).
+        if on_close is not None:
+            sf.events.closed.connect(lambda: on_close(), [])
+        return sf
 
     def create_image_figure(self, title="", **kwargs):
-        # Fall back to the MPL-based figure until anyplotlib has its own.
         from hyperspy.drawing.image import ImagePlot
 
-        return ImagePlot(title=title)
+        imf = ImagePlot(title=title)
+        return imf
 
     def create_scalebar(self, ax, units, **kwargs):
         # ScaleBar now routes all artist ops through the backend, so it works
@@ -844,3 +928,22 @@ class _AplColorbar:
 
     def __init__(self, im_handle):
         self._im = im_handle
+
+
+class _AplTextHandle:
+    """Lightweight sentinel for text annotations on backends without native text.
+
+    Stores the text content and colour so that ``update_text`` /
+    ``text_get_color`` / ``text_set_color`` remain functional even when the
+    underlying canvas cannot render text.  ``remove_text`` is a no-op because
+    there is nothing on the canvas to remove.
+    """
+
+    __slots__ = ("s", "color")
+
+    def __init__(self, s: str, color: str = "white") -> None:
+        self.s = s
+        self.color = color
+
+    def __repr__(self) -> str:
+        return f"_AplTextHandle({self.s!r}, color={self.color!r})"
