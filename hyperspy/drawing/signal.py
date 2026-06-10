@@ -37,9 +37,8 @@ def _plot_1D_component(
 ):
     backend = get_backend()
     if ax is None:
-        import matplotlib.pyplot as plt
-
-        ax = plt.gca()
+        fig = backend.create_figure()
+        ax = backend.create_axes(fig)
     axis = axes_manager.signal_axes[0]
     if calibrate:
         x = axis.axis
@@ -67,9 +66,8 @@ def _plot_2D_component(
     shape = axes_manager._signal_shape_in_array
     factors = to_numpy(factors[:, idx].reshape(shape))
     if ax is None:
-        import matplotlib.pyplot as plt
-
-        ax = plt.gca()
+        fig = backend.create_figure()
+        ax = backend.create_axes(fig)
     axes = axes_manager.signal_axes[::-1]
     extent = None
     if calibrate:
@@ -105,9 +103,8 @@ def _plot_loading(
     backend = get_backend()
     loadings = to_numpy(loadings[idx])
     if ax is None:
-        import matplotlib.pyplot as plt
-
-        ax = plt.gca()
+        fig = backend.create_figure()
+        ax = backend.create_axes(fig)
     if no_nans:
         loadings = np.nan_to_num(loadings)
     axes = axes_manager.navigation_axes

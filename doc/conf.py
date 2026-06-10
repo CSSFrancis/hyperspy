@@ -50,6 +50,16 @@ extensions = [
     "sphinx_favicon",
 ]
 
+# anyplotlib.sphinx_anywidget: injects the AnywidgetScraper and Pyodide bridge
+# for interactive anywidget figures in the gallery.
+try:
+    import anyplotlib.sphinx_anywidget  # noqa: F401
+    extensions.append("anyplotlib.sphinx_anywidget")
+    # Package whose wheel is built and served to Pyodide for interactive mode.
+    anywidget_pyodide_package = "hyperspy"
+except ImportError:
+    pass
+
 # jupyterlite-sphinx is optional: enables "Run this example in the browser"
 # buttons on Sphinx Gallery pages via Pyodide/JupyterLite.
 # Install with:  pip install jupyterlite-sphinx
@@ -432,18 +442,32 @@ numpydoc_class_members_toctree = False
 # -- Sphinx-Gallery---------------
 
 # https://sphinx-gallery.github.io
+_gallery_scrapers = ["matplotlib"]
+try:
+    from anyplotlib.sphinx_anywidget import AnywidgetScraper
+    # AnywidgetScraper must run before the matplotlib scraper so anywidget
+    # figures are captured before matplotlib closes its figures.
+    _gallery_scrapers = (AnywidgetScraper(), "matplotlib")
+except ImportError:
+    pass
+
 sphinx_gallery_conf = {
     "examples_dirs": "../examples",  # path to your example scripts
     "gallery_dirs": "auto_examples",  # path to where to save gallery generated output
     # directory where function/class granular galleries are stored
     "backreferences_dir": "backreferences",
-    # Modules for which function/class level galleries are created. In
-    # this case hyperspy in a tuple of strings.
+    # Modules for which function/class level galleries are created.
     "doc_module": ("hyperspy",),
     "filename_pattern": ".py",  # pattern to define which will be executed
     "ignore_pattern": "_sgskip.py",  # pattern to define which will not be executed
-    "notebook_images": "https://hyperspy.org/hyperspy-doc/current/",  # folder for loading images in gallery
+    "notebook_images": "https://hyperspy.org/hyperspy-doc/current/",
     "reference_url": {"hyperspy": None},
+    # AnywidgetScraper captures anywidget figures via headless Chromium;
+    # matplotlib scraper handles all plt figures in the same example.
+    "image_scrapers": _gallery_scrapers,
+    # Don't use capture_repr for anywidget outputs — the scraper handles them.
+    "capture_repr": (),
+    "abort_on_example_error": False,
 }
 
 # When jupyterlite-sphinx is available, inject a "Run in browser" button on

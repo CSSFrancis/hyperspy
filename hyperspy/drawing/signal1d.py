@@ -155,14 +155,23 @@ class Signal1DFigure(AbstractSignal1DFigure):
         # Or remove it from the color cycle if part of the cycle
         # in this round
         else:
-            try:
-                import matplotlib.colors as mpl_colors
+            cycle = self._color_cycles[line.type].color_cycle
+            # Fast path: exact string match (works for any backend)
+            if line.color in cycle:
+                cycle.remove(line.color)
+            else:
+                # Slow path: normalise via matplotlib's to_rgba so that
+                # e.g. "blue" and (0,0,1,1) compare equal.  Silently
+                # skipped if matplotlib is unavailable or the color
+                # string is not recognised.
+                try:
+                    from matplotlib.colors import to_rgba
 
-                rgba_color = mpl_colors.to_rgba(line.color)
-                if rgba_color in self._color_cycles[line.type].color_cycle:
-                    self._color_cycles[line.type].color_cycle.remove(rgba_color)
-            except ImportError:
-                pass
+                    rgba_color = to_rgba(line.color)
+                    if rgba_color in cycle:
+                        cycle.remove(rgba_color)
+                except (ImportError, ValueError):
+                    pass
 
     def plot(self, data_function_kwargs={}, **kwargs):
         backend = get_backend()
@@ -400,22 +409,21 @@ class Signal1DLine(object):
             backend.remove_line(self.ax, self.line)
 
         norm = self.norm
-        try:
-            import matplotlib.colors as mpl_colors
+        if norm not in ["auto", "linear", "log"]:
+            # Provide a targeted message when the user passes a matplotlib
+            # Normalize object, which is only valid for Signal2D.
+            _extra = ""
+            try:
+                import matplotlib.colors as mpl_colors
 
-            _mpl_norm_cls = mpl_colors.Normalize
-        except ImportError:
-            _mpl_norm_cls = type(None)
-        if isinstance(norm, _mpl_norm_cls) or (
-            inspect.isclass(norm) and issubclass(norm, _mpl_norm_cls)
-        ):
+                if isinstance(norm, mpl_colors.Normalize) or (
+                    inspect.isclass(norm) and issubclass(norm, mpl_colors.Normalize)
+                ):
+                    _extra = " (matplotlib Normalize instances are only valid for Signal2D)"
+            except ImportError:
+                pass
             raise ValueError(
-                "Matplotlib Normalize instance or subclass can "
-                "be used for Signal2D only."
-            )
-        elif norm not in ["auto", "linear", "log"]:
-            raise ValueError(
-                "`norm` paramater should be 'auto', 'linear' or 'log' for Signal1D."
+                f"`norm` parameter should be 'auto', 'linear' or 'log' for Signal1D.{_extra}"
             )
 
         props = dict(self.line_properties)
@@ -569,9 +577,8 @@ class Signal1DLine(object):
 def _plot_component(factors, idx, ax=None, cal_axis=None, comp_label="PC"):
     backend = get_backend()
     if ax is None:
-        import matplotlib.pyplot as plt
-
-        ax = plt.gca()
+        fig = backend.create_figure()
+        ax = backend.create_axes(fig)
     if cal_axis is not None:
         x = cal_axis.axis
         backend.set_xlabel(ax, cal_axis.units)
@@ -594,9 +601,8 @@ def _plot_loading(
 ):
     backend = get_backend()
     if ax is None:
-        import matplotlib.pyplot as plt
-
-        ax = plt.gca()
+        fig = backend.create_figure()
+        ax = backend.create_axes(fig)
     if no_nans:
         loadings = np.nan_to_num(loadings)
     if axes_manager.navigation_dimension == 2:

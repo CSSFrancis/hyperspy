@@ -58,6 +58,9 @@ if _HAS_ANYPLOTLIB:
     s2.axes_manager[1].units = "eV"
 
     s2.plot()
+    # Expose the combined anyplotlib figure so the gallery scraper captures it.
+    _apl_fig = s2._plot.signal_plot.figure
+    _apl_fig = getattr(_apl_fig, "_real_fig", _apl_fig)  # unwrap proxy
 else:
     print("anyplotlib not installed — skipping WebGL example.  "
           "Install with:  pip install anyplotlib")

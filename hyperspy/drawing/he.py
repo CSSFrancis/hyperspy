@@ -173,11 +173,12 @@ class HyperExplorer:
 
     def _create_1d_nav_figure(self, title, **kwargs):
         from hyperspy.drawing import signal1d
+        from hyperspy.drawing.backends import get_backend
 
         fig = kwargs.pop("fig", None)
-        sf = signal1d.Signal1DFigure(
+        sf = get_backend().create_signal1d_figure(
             title=title,
-            _on_figure_window_close=self.close,
+            on_close=self.close,
             fig=fig,
         )
         axis = self.axes_manager.navigation_axes[0]
@@ -187,6 +188,8 @@ class HyperExplorer:
         sf.ylabel = r"$\Sigma\mathrm{data\,over\,all\,other\,axes}$"
         sf.axis = axis
         sf.axes_manager = self.axes_manager
+        if sf.ax is None:
+            sf.create_axis()
 
         sl = signal1d.Signal1DLine()
         sl.data_function = self.navigator_data_function
@@ -200,9 +203,9 @@ class HyperExplorer:
 
     def _create_2d_nav_figure(self, title, **kwargs):
         from hyperspy.defaults_parser import preferences
-        from hyperspy.drawing import image
+        from hyperspy.drawing.backends import get_backend
 
-        imf = image.ImagePlot(title=title)
+        imf = get_backend().create_image_figure(title=title)
         imf.data_function = self.navigator_data_function
 
         for key, value in list(kwargs.items()):

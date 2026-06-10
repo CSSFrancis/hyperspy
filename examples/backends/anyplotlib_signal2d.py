@@ -49,6 +49,9 @@ try:
     import anyplotlib  # noqa: F401
     hs.preferences.Plot.backend = "anyplotlib"
     s.plot()
+    # Expose figure for gallery scraper.
+    _apl_fig = s._plot.signal_plot.figure
+    _apl_fig = getattr(_apl_fig, "_real_fig", _apl_fig)
     hs.preferences.Plot.backend = "matplotlib"
 except ImportError:
     print("anyplotlib not installed — skipping WebGL plot.  "
