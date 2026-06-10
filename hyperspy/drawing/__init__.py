@@ -23,7 +23,7 @@ from hyperspy.defaults_parser import preferences as _pref
 from hyperspy.drawing.backends import register_backend as _register_backend
 from hyperspy.drawing.backends._registry import load_backend as _load_backend
 
-_register_backend(_load_backend("matplotlib"))
+_register_backend(_load_backend(_pref.Plot.backend or "matplotlib"))
 
 
 def _on_backend_pref_change(change=None):
@@ -45,9 +45,9 @@ except ImportError:
     pass
 
 __all__ = [
-    "mpl_he",
-    "mpl_hie",
-    "mpl_hse",
+    "he",
+    "hie",
+    "hse",
     "signal",
     "signal1d",
     "utils",
