@@ -3,34 +3,51 @@
 Interactive HyperSpy in the Browser
 ====================================
 
-This example is designed to run **interactively in the browser** via
-JupyterLite / Pyodide.  Click the *Run this example in the browser* button
-at the top of the page to launch a fully-functional HyperSpy session without
-installing anything locally.
+Click the **⚡** badge on the figure below to launch this example live in
+your browser via Pyodide — no installation required.
+
+After a short bootstrap (~10 s the first time, cached on repeat visits),
+the navigator on the left becomes fully interactive: click or drag to move
+the crosshair and watch the spectrum on the right update in real time.
 
 What this demonstrates
 ----------------------
 
-* Creating a synthetic hyperspectral dataset
-* Switching to the ``anyplotlib`` backend
-* Calling ``.plot()`` to get a linked navigator + signal display
-* Moving the navigation pointer to update the signal in real time
-
-The anyplotlib backend renders into a WebGL canvas via ``jupyter_rfb``, which
-works in JupyterLite just like it does in a local Jupyter notebook.
-
-.. note::
-
-   This example requires ``anyplotlib`` and ``jupyterlite-sphinx``.  When
-   viewed on the HyperSpy documentation website the *Run in browser* button
-   is injected automatically by ``jupyterlite-sphinx``.
+* Building a synthetic EELS-style spectrum image entirely in NumPy
+* Attaching a navigating :class:`~hyperspy.api.plot.markers.VerticalLines`
+  marker whose position tracks the Gaussian peak centre across the map
+* Calling :meth:`~.api.signals.BaseSignal.plot` to get a linked
+  navigator + signal display via the ``anyplotlib`` backend
+* How the ⚡ Pyodide bridge re-runs the full example in WASM and wires
+  navigation events back to Python for live updates
 
 """
+
+# Pyodide environment declarations
+# ---------------------------------
+# _PYODIDE_PACKAGES: pre-built Pyodide WASM wheels to load before execution.
+# _PYODIDE_MOCK_PACKAGES: packages that aren't available in Pyodide but are
+#   listed in HyperSpy's metadata — register as stubs so micropip skips them
+#   during dependency resolution.
+_PYODIDE_PACKAGES = ["scipy", "sympy", "matplotlib", "pyyaml"]
+_PYODIDE_MOCK_PACKAGES = [
+    "dask",
+    "distributed",
+    "rosettasciio",
+    "cloudpickle",
+    "pint",
+    "natsort",
+    "prettytable",
+    "traits",
+    "tqdm",
+    "packaging",
+    "importlib_metadata",
+]
 
 # %%
 # Setup
 # -----
-# Import HyperSpy and configure the anyplotlib backend.
+# Import HyperSpy and switch to the anyplotlib backend.
 
 import numpy as np
 import hyperspy.api as hs
@@ -38,25 +55,26 @@ import hyperspy.api as hs
 hs.preferences.Plot.backend = "anyplotlib"
 
 # %%
-# Create a synthetic spectrum image
-# ----------------------------------
-# 12×12 navigation, 256-channel spectrum.  Each pixel contains a Gaussian
-# whose centre position encodes the spatial coordinate.
+# Synthetic spectrum image
+# -------------------------
+# 10 × 10 navigation map, 128-channel energy axis.  Each pixel contains a
+# Gaussian whose centre drifts linearly with the x-position — the kind of
+# peak shift you'd see in a real EELS dataset.
 
 rng = np.random.default_rng(2024)
 
-nav_y, nav_x, n_channels = 12, 12, 256
-energy = np.linspace(0, 10, n_channels)
-data = np.zeros((nav_y, nav_x, n_channels))
+nav_y, nav_x, n_ch = 10, 10, 128
+energy = np.linspace(0, 10, n_ch)
+data = np.zeros((nav_y, nav_x, n_ch))
 
 for iy in range(nav_y):
     for ix in range(nav_x):
-        centre = 2.0 + ix * 0.4 + iy * 0.2
-        width = 0.3 + rng.random() * 0.2
-        amplitude = 0.8 + rng.random() * 0.4
-        data[iy, ix] = amplitude * np.exp(-0.5 * ((energy - centre) / width) ** 2)
+        centre = 2.0 + ix * 0.5 + iy * 0.1
+        width = 0.35 + rng.random() * 0.15
+        amp = 0.8 + rng.random() * 0.4
+        data[iy, ix] = amp * np.exp(-0.5 * ((energy - centre) / width) ** 2)
 
-data += rng.random((nav_y, nav_x, n_channels)) * 0.03
+data += rng.random((nav_y, nav_x, n_ch)) * 0.02
 
 s = hs.signals.Signal1D(data)
 s.axes_manager[0].name = "y"
@@ -69,17 +87,20 @@ s.axes_manager[2].name = "energy"
 s.axes_manager[2].scale = energy[1] - energy[0]
 s.axes_manager[2].offset = energy[0]
 s.axes_manager[2].units = "eV"
-s.metadata.General.title = "Synthetic EELS spectrum image"
+s.metadata.General.title = "Synthetic EELS"
 
 # %%
-# Add a marker that tracks the peak centre for every pixel.
-# The peak centre shifts with x — adding a VerticalLines marker makes this
-# drift visible as you navigate the map.
+# Navigating marker
+# ------------------
+# A :class:`~hyperspy.api.plot.markers.VerticalLines` marker that shows the
+# theoretical peak centre for each pixel.  Because the centre varies with x,
+# the orange line shifts left-to-right as you navigate across the map.
+#
+# Navigating markers use a ``dtype=object`` array with the navigation shape,
+# where each element is an array of positions for that navigation coordinate.
 
-peak_centres = 2.0 + np.arange(nav_x) * 0.4   # centre varies with x only
+peak_centres = 2.0 + np.arange(nav_x) * 0.5  # centre varies with x
 
-# Navigating markers need a dtype=object array with navigation_shape,
-# where each element is an array of line positions for that nav coordinate.
 offsets_vlines = np.empty((nav_y, nav_x), dtype=object)
 for iy in range(nav_y):
     for ix in range(nav_x):
@@ -87,29 +108,25 @@ for iy in range(nav_y):
 
 vlines = hs.plot.markers.VerticalLines(
     offsets=offsets_vlines,
-    colors="#FF6400B3",  # orange with ~70% opacity (works in both mpl and anyplotlib)
-    linewidths=1.5,
+    colors="#FF6400CC",
+    linewidths=2.0,
 )
 s.add_marker(vlines, permanent=True)
 
 # %%
-# Plot
-# ----
-# A navigator (summed intensity map) appears on the left; the spectrum at
-# the current navigation position appears on the right.  Click on the
-# navigator to move the cursor and watch the spectrum update.
+# Plot — click ⚡ to make it live
+# ---------------------------------
+# The navigator (summed intensity map) is on the left; the spectrum at the
+# current position is on the right.  After clicking ⚡, clicking or dragging
+# on the navigator updates the spectrum in real time via Pyodide.
 
 try:
     import anyplotlib  # noqa: F401
     hs.preferences.Plot.backend = "anyplotlib"
     s.plot()
-    # Expose the combined figure widget for the gallery scraper.
-    # The "# Interactive" tag tells AnywidgetScraper to embed the full Python
-    # source so the Pyodide bridge can re-run the example live in the browser.
     _apl_fig = s._plot.signal_plot.figure
     _apl_fig = getattr(_apl_fig, "_real_fig", _apl_fig)  # Interactive
     hs.preferences.Plot.backend = "matplotlib"
 except ImportError:
-    print("anyplotlib not installed — skipping WebGL plot.  "
-          "Install with:  pip install anyplotlib")
-    s.plot()  # fall back to matplotlib so the gallery thumbnail is generated
+    print("anyplotlib not installed — falling back to matplotlib.")
+    s.plot()
