@@ -28,11 +28,12 @@ User guide
 .. toctree::
     :caption: Advanced Usage
     :maxdepth: 2
-    
+
     region_of_interest.rst
     events.rst
     interactive_operations.rst
     pint_unit_registry.rst
+    backends.rst
 
 .. toctree::
     :caption: Bibliography

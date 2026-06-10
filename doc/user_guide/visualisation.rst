@@ -13,6 +13,13 @@ datasets: an EELS spectrum image and an EDX dataset consisting of a secondary
 electron emission image stack and a 3D hyperspectral image, both simultaneously
 acquired by recording two signals in parallel in a FIB/SEM.
 
+.. note::
+
+   HyperSpy supports multiple plotting backends.  The default is
+   ``"matplotlib"``; the ``"anyplotlib"`` backend provides a WebGL-accelerated
+   alternative that works natively in Jupyter.  See :ref:`plotting-backends`
+   for details and interactive examples.
+
 
 .. code-block:: python
 

@@ -50,6 +50,15 @@ extensions = [
     "sphinx_favicon",
 ]
 
+# jupyterlite-sphinx is optional: enables "Run this example in the browser"
+# buttons on Sphinx Gallery pages via Pyodide/JupyterLite.
+# Install with:  pip install jupyterlite-sphinx
+try:
+    import jupyterlite_sphinx  # noqa: F401
+    extensions.append("jupyterlite_sphinx")
+except ImportError:
+    pass
+
 linkcheck_ignore = [
     "https://anaconda.org",  # 403 Client Error: Forbidden for url
     r"https://docs\.conda\.io/.*",  # 429 rate limit from CI IPs
@@ -436,6 +445,23 @@ sphinx_gallery_conf = {
     "notebook_images": "https://hyperspy.org/hyperspy-doc/current/",  # folder for loading images in gallery
     "reference_url": {"hyperspy": None},
 }
+
+# When jupyterlite-sphinx is available, inject a "Run in browser" button on
+# every Sphinx Gallery page so readers can try examples interactively via
+# Pyodide without a local install.
+#
+# Install:  pip install jupyterlite-sphinx
+# The configuration file (jupyterlite_config.json) lists the packages that
+# will be pre-installed in the Pyodide environment.
+try:
+    import jupyterlite_sphinx  # noqa: F401
+    sphinx_gallery_conf["jupyterlite"] = {
+        "notebook_modification_function": None,
+    }
+    # Tell jupyterlite-sphinx where our Pyodide environment config lives.
+    jupyterlite_config = "jupyterlite_config.json"
+except ImportError:
+    pass
 
 if platform.system() != "Windows":
     # optipng is not straightforward to install on Windows

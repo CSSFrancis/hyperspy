@@ -117,6 +117,7 @@ dev = [
 doc = [
     "holospy", # example gallery
     "IPython", # Needed in testing code in basic_usage.rst
+    "jupyterlite-sphinx",  # optional: "Run in browser" buttons via Pyodide
     "numpydoc",
     "pybaselines", # for docstring test
     "pydata_sphinx_theme",

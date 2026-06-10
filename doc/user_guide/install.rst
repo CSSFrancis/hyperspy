@@ -192,6 +192,15 @@ dependencies required by specific functionalities:
 * ``all`` to install all the above except the development requirements
   (``tests``, ``doc`` and ``dev``).
 
+Optional: anyplotlib backend
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To use the WebGL-accelerated ``anyplotlib`` plotting backend::
+
+    pip install anyplotlib
+
+See :ref:`plotting-backends` for usage and examples.
+
 For example:
 
 .. code-block:: bash

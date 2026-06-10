@@ -1,0 +1,17 @@
+{
+  "LiteBuildConfig": {
+    "extra_labextensions": [],
+    "lite_dir": null
+  },
+  "PipliteAddon": {
+    "extra_pip_dirs": [],
+    "extra_lab_extensions": [],
+    "pypi_packages": [
+      "hyperspy",
+      "anyplotlib",
+      "numpy",
+      "scipy",
+      "matplotlib"
+    ]
+  }
+}
