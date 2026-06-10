@@ -90,16 +90,21 @@ class BlittedFigure:
         backend.blit(self.figure)
 
     def get_mpl_figure(self):
-        """Return the matplotlib Figure (name kept for backward compatibility).
+        """Return the root figure object, unwrapping sub-figures if needed.
 
-        When ``self.figure`` is a matplotlib ``SubFigure``, the parent
-        ``Figure`` is returned instead.
+        For matplotlib SubFigures the parent Figure is returned.  For all
+        other backends ``self.figure`` is returned unchanged.
+
+        The name is kept for backward compatibility; callers that only use
+        matplotlib can rely on this returning a ``matplotlib.figure.Figure``.
         """
         if self.figure is None:
             return None
         figure = self.figure
-        # SubFigure has a .figure attribute pointing to the parent Figure;
-        # a top-level Figure does not, so this duck-type check is safe.
+        # Duck-type: SubFigure (MPL) has a `.figure` pointing to its parent
+        # Figure; a top-level Figure does not (it has .figure == self or no
+        # .figure at all).  Any backend object that has .figure pointing to a
+        # *different* object is treated the same way.
         parent = getattr(figure, "figure", None)
         if parent is not None and parent is not figure:
             return parent
@@ -128,6 +133,10 @@ class BlittedFigure:
 
     def _on_close(self):
         _logger.debug("Closing `BlittedFigure`.")
+        if self.figure is None:
+            return  # already closed; guard against re-entrant / double calls
+        fig = self.figure
+        self.figure = None  # set before triggering events to guard re-entrant calls
         self.ax = None
         self._background = None
         # Same snapshot-copy rationale as remove_markers (see above).
@@ -137,9 +146,8 @@ class BlittedFigure:
         for f in list(self.events.closed.connected):
             self.events.closed.disconnect(f)
         if self._draw_event_cid is not None:
-            get_backend().disconnect_event(self.figure, self._draw_event_cid)
+            get_backend().disconnect_event(fig, self._draw_event_cid)
             self._draw_event_cid = None
-        self.figure = None
         _logger.debug("`BlittedFigure` closed.")
 
     def close(self):
