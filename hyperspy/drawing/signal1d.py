@@ -419,7 +419,9 @@ class Signal1DLine(object):
                 if isinstance(norm, mpl_colors.Normalize) or (
                     inspect.isclass(norm) and issubclass(norm, mpl_colors.Normalize)
                 ):
-                    _extra = " (matplotlib Normalize instances are only valid for Signal2D)"
+                    _extra = (
+                        " (matplotlib Normalize instances are only valid for Signal2D)"
+                    )
             except ImportError:
                 pass
             raise ValueError(

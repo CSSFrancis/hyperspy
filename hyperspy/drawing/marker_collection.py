@@ -133,11 +133,13 @@ class PointsCollection(HyperMarkerCollection):
     _marker_type = "points"
     _position_key = "offsets"
 
+
 class CirclesCollection(HyperMarkerCollection):
     """Descriptor for circle markers with explicit radii (data-space sized)."""
 
     _marker_type = "circles"
     _position_key = "offsets"
+
 
 class SquaresCollection(HyperMarkerCollection):
     """Descriptor for square markers with explicit widths."""
@@ -145,11 +147,13 @@ class SquaresCollection(HyperMarkerCollection):
     _marker_type = "squares"
     _position_key = "offsets"
 
+
 class LinesCollection(HyperMarkerCollection):
     """Descriptor for arbitrary line segment markers (segments key)."""
 
     _marker_type = "lines"
     _position_key = "segments"
+
 
 class VLinesCollection(HyperMarkerCollection):
     """Descriptor for vertical line markers spanning the full axes height.
@@ -162,6 +166,7 @@ class VLinesCollection(HyperMarkerCollection):
     _position_key = "offsets"
     _position_key_to_set = "segments"
 
+
 class HLinesCollection(HyperMarkerCollection):
     """Descriptor for horizontal line markers spanning the full axes width.
 
@@ -173,11 +178,13 @@ class HLinesCollection(HyperMarkerCollection):
     _position_key = "offsets"
     _position_key_to_set = "segments"
 
+
 class TextsCollection(HyperMarkerCollection):
     """Descriptor for text annotation markers."""
 
     _marker_type = "texts"
     _position_key = "offsets"
+
 
 class RectanglesCollection(HyperMarkerCollection):
     """Descriptor for rectangle markers with explicit widths and heights."""
@@ -185,17 +192,20 @@ class RectanglesCollection(HyperMarkerCollection):
     _marker_type = "rectangles"
     _position_key = "offsets"
 
+
 class EllipsesCollection(HyperMarkerCollection):
     """Descriptor for ellipse markers with explicit widths, heights, and angles."""
 
     _marker_type = "ellipses"
     _position_key = "offsets"
 
+
 class PolygonsCollection(HyperMarkerCollection):
     """Descriptor for polygon markers defined by explicit vertex lists."""
 
     _marker_type = "polygons"
     _position_key = "verts"
+
 
 class ArrowsCollection(HyperMarkerCollection):
     """Descriptor for arrow / quiver markers."""

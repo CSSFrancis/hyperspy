@@ -182,8 +182,15 @@ class StubBackend(BackendBase):
     # =========================================================================
 
     def plot_image(
-        self, ax, data, extent=None, vmin=None, vmax=None, norm=None,
-        cmap="gray", **kwargs,
+        self,
+        ax,
+        data,
+        extent=None,
+        vmin=None,
+        vmax=None,
+        norm=None,
+        cmap="gray",
+        **kwargs,
     ):
         raise NotImplementedError
 

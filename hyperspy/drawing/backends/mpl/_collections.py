@@ -116,8 +116,7 @@ def validate_collection_class(collection):
 
     if not issubclass(collection, mpl_collections.Collection):
         raise ValueError(
-            f"{collection} is not a subclass of "
-            "`matplotlib.collection.Collection`."
+            f"{collection} is not a subclass of `matplotlib.collection.Collection`."
         )
 
     if ".".join(collection.__module__.split(".")[:2]) not in [

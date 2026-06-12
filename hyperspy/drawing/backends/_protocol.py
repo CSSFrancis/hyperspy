@@ -687,15 +687,11 @@ class BackendBase(BlitMixin, PointerMixin):
 
     @unsupported
     def collection_update(self, handle: Any, **kwargs) -> None:
-        raise BackendCapabilityError(
-            "collection_update not supported by this backend"
-        )
+        raise BackendCapabilityError("collection_update not supported by this backend")
 
     @unsupported
     def collection_remove(self, ax: Any, handle: Any) -> None:
-        raise BackendCapabilityError(
-            "collection_remove not supported by this backend"
-        )
+        raise BackendCapabilityError("collection_remove not supported by this backend")
 
     # ── Generic figure-manager / explorer factories ───────────────────────
     #
