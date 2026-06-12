@@ -133,9 +133,11 @@ Writing a custom backend
 
 Any plotting library can be connected to HyperSpy by:
 
-1. Implementing the :class:`~hyperspy.drawing.backends._protocol.PlottingBackend`
-   protocol (see :mod:`hyperspy.drawing.backends._stub` for a copy-paste
-   starting point).
+1. Subclassing :class:`~hyperspy.drawing.backends.BackendBase` and
+   implementing the required core drawing primitives (see
+   :mod:`hyperspy.drawing.backends._stub` for a copy-paste starting point).
+   Optional features — navigation pointers, native markers, selectors,
+   blitting — are inherited as safe defaults and can be added incrementally.
 2. Registering the class as a Python entry point under the
    ``"hyperspy.backends"`` group.
 
@@ -156,10 +158,40 @@ For in-process registration (useful during development):
 
     from hyperspy.drawing.backends import register_backend
     from mypackage.plotting import MyBackend
-    register_backend("mybackend", MyBackend)
+    register_backend(MyBackend())
+
+Verify conformance by adding the public test suite to your package's tests:
+
+.. code-block:: python
+
+    from hyperspy.drawing.backends.testing import BackendConformanceSuite
+
+    from mypackage.plotting import MyBackend
+
+
+    class TestMyBackendConformance(BackendConformanceSuite):
+        backend_factory = MyBackend
 
 See :ref:`backends-gallery` for a worked example, and
 ``hyperspy/drawing/backends/_stub.py`` for the full method reference.
+
+Capability discovery
+--------------------
+
+Calling code — including GUI applications embedding HyperSpy — can query
+which optional features the active backend provides, and disable the
+corresponding affordances up front:
+
+.. code-block:: python
+
+    from hyperspy.drawing.backends import get_backend
+
+    backend = get_backend()
+    backend.supports("create_span_selector")   # ROI span selection
+    backend.supports("create_markers")         # native marker rendering
+
+A feature reporting ``False`` raises
+:exc:`~hyperspy.drawing.backends.BackendCapabilityError` when called.
 
 Protocol reference
 ------------------
@@ -168,6 +200,9 @@ Protocol reference
    :members:
    :undoc-members:
 
+.. autoclass:: hyperspy.drawing.backends._protocol.BackendBase
+   :members:
+
 .. autoclass:: hyperspy.drawing.backends._protocol.BlitMixin
    :members:
 
@@ -175,3 +210,8 @@ Protocol reference
    :members:
 
 .. autoexception:: hyperspy.drawing.backends._protocol.BackendCapabilityError
+
+.. autofunction:: hyperspy.drawing.backends._protocol.unsupported
+
+.. automodule:: hyperspy.drawing.backends.testing
+   :members: check_backend, BackendConformanceSuite

@@ -27,13 +27,10 @@ from hyperspy.misc import _markers, dask_utils, utils
 
 
 def _is_patch(obj):
-    """Return True if obj is a matplotlib Patch (lazy import)."""
-    try:
-        from matplotlib.patches import Patch
+    """Return True if obj is a matplotlib Patch (legacy MPL fallback path)."""
+    from hyperspy.drawing.backends.mpl._collections import is_patch
 
-        return isinstance(obj, Patch)
-    except ImportError:
-        return False
+    return is_patch(obj)
 
 
 def convert_positions(peaks, signal_axes):
@@ -175,15 +172,11 @@ class Markers:
                 try:
                     collection = HyperMarkerCollection.from_marker_type(collection)
                 except ValueError:
-                    import matplotlib.collections as mpl_collections
+                    from hyperspy.drawing.backends.mpl._collections import (
+                        resolve_collection_string,
+                    )
 
-                    try:
-                        collection = getattr(mpl_collections, collection)
-                    except AttributeError:
-                        raise ValueError(
-                            f"'{collection}' is not a known marker type or the name "
-                            "of a matplotlib collection class."
-                        )
+                    collection = resolve_collection_string(collection)
 
             if HyperMarkerCollection.is_hyper_collection(collection):
                 # Backend-agnostic path: derive position keys and marker type
@@ -195,25 +188,11 @@ class Markers:
             else:
                 # Legacy MPL-only path: validate it is a Collection subclass
                 # from a module that can be safely reconstructed on load.
-                import matplotlib.collections as mpl_collections
+                from hyperspy.drawing.backends.mpl._collections import (
+                    validate_collection_class,
+                )
 
-                if not issubclass(collection, mpl_collections.Collection):
-                    raise ValueError(
-                        f"{collection} is not a subclass of "
-                        "`matplotlib.collection.Collection`."
-                    )
-
-                if ".".join(collection.__module__.split(".")[:2]) not in [
-                    "matplotlib.collections",
-                    "hyperspy.external",
-                ]:
-                    # To be able to load a custom markers, we need to be able to
-                    # instantiate the class and the safe way to do that is to import
-                    # from `matplotlib.collections` or `hyperspy.external`.
-                    raise ValueError(
-                        "To support loading file saved with custom markers, the "
-                        "collection must be implemented in matplotlib or hyperspy"
-                    )
+                validate_collection_class(collection)
 
         # Data attributes
         self.kwargs = kwargs  # all keyword arguments.
@@ -816,6 +795,14 @@ class Markers:
                 pass
 
         if not self._using_native_markers:
+            # Fail fast before constructing an MPL collection the backend
+            # cannot render anyway.
+            if not backend.supports("add_collection"):
+                raise BackendCapabilityError(
+                    "The active backend does not support markers "
+                    f"(marker type {self._marker_type!r} has no native "
+                    "implementation and 'add_collection' is unavailable)."
+                )
             self._initialize_collection()
             backend.artist_set_animated(
                 self._collection,

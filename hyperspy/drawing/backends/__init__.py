@@ -1,4 +1,9 @@
-from hyperspy.drawing.backends._protocol import PlottingBackend
+from hyperspy.drawing.backends._protocol import (
+    BackendBase,
+    BackendCapabilityError,
+    PlottingBackend,
+    unsupported,
+)
 
 _active_backend: PlottingBackend | None = None
 
@@ -18,3 +23,13 @@ def get_backend() -> PlottingBackend:
             "after the default backend is configured."
         )
     return _active_backend
+
+
+__all__ = [
+    "BackendBase",
+    "BackendCapabilityError",
+    "PlottingBackend",
+    "get_backend",
+    "register_backend",
+    "unsupported",
+]

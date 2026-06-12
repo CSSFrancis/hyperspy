@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 
+from hyperspy.drawing.backends._protocol import BackendBase
 
-class MplBackend:
+
+class MplBackend(BackendBase):
     """Wraps all matplotlib calls used by the hyperspy drawing layer."""
 
     # ── Figure lifecycle ──────────────────────────────────────────────────
@@ -169,14 +171,12 @@ class MplBackend:
 
         plt.setp(handle, **props)
 
-    def line_get_xdata(self, handle):
-        return handle.get_xdata()
-
-    def line_get_color(self, handle):
-        return handle.get_color()
-
-    def line_get_linewidth(self, handle):
-        return handle.get_linewidth()
+    def get_line_props(self, handle):
+        return {
+            "color": handle.get_color(),
+            "linewidth": handle.get_linewidth(),
+            "xdata": handle.get_xdata(),
+        }
 
     # ── Text annotations ─────────────────────────────────────────────────
 
@@ -193,16 +193,11 @@ class MplBackend:
         if handle is not None and handle in ax.texts:
             handle.remove()
 
-    def text_set_color(self, handle, color):
+    def set_text_props(self, handle, **props):
         if handle is not None:
             import matplotlib.pyplot as plt
 
-            plt.setp(handle, color=color)
-
-    def text_get_color(self, handle):
-        if handle is not None:
-            return handle.get_color()
-        return "black"
+            plt.setp(handle, **props)
 
     # ── Generic artist ────────────────────────────────────────────────────
 
@@ -465,8 +460,8 @@ class MplBackend:
 
         return PolygonSelector(ax, **kwargs)
 
-    def connect_widget_drag(self, handle, on_drag):
-        pass  # MPL widgets fire drag via _onmousemove in the widget base class
+    # connect_widget_drag: PointerMixin no-op default — MPL widgets fire drag
+    # via _onmousemove in the widget base class.
 
     def get_ax_transform(self, ax, kind):
         transforms = {
@@ -511,45 +506,35 @@ class MplBackend:
 
     # ── Native marker collections ─────────────────────────────────────────
 
-    _MARKER_COLLECTION_MAP = None
-
-    def _marker_collection_map(self):
-        if self._MARKER_COLLECTION_MAP is None:
-            from matplotlib.collections import LineCollection
-
-            from hyperspy.external.matplotlib.collections import (
-                CircleCollection,
-                EllipseCollection,
-                RectangleCollection,
-                SquareCollection,
-                TextCollection,
-            )
-
-            MplBackend._MARKER_COLLECTION_MAP = {
-                "points": CircleCollection,
-                "circles": CircleCollection,
-                "squares": SquareCollection,
-                "lines": LineCollection,
-                "hlines": LineCollection,
-                "vlines": LineCollection,
-                "texts": TextCollection,
-                "rectangles": RectangleCollection,
-                "ellipses": EllipseCollection,
-            }
-        return self._MARKER_COLLECTION_MAP
+    # Types whose Collection class is constructed from plain kwargs.
+    # "arrows" (Quiver takes positional X, Y, U, V) and "polygons" go
+    # through the descriptor fallback path in Markers._initialize_collection.
+    _NATIVE_MARKER_TYPES = frozenset(
+        {
+            "points",
+            "circles",
+            "squares",
+            "lines",
+            "hlines",
+            "vlines",
+            "texts",
+            "rectangles",
+            "ellipses",
+        }
+    )
 
     def create_markers(self, ax, marker_type, **kwargs):
         from hyperspy.drawing.backends._protocol import BackendCapabilityError
+        from hyperspy.drawing.backends.mpl._collections import get_collection_class
 
         offset_space = kwargs.pop("offset_space", "data")
         transform_space = kwargs.pop("transform_space", "display")
 
-        cmap = self._marker_collection_map()
-        collection_cls = cmap.get(marker_type)
-        if collection_cls is None:
+        if marker_type not in self._NATIVE_MARKER_TYPES:
             raise BackendCapabilityError(
                 f"Marker type {marker_type!r} not supported by the MPL backend"
             )
+        collection_cls = get_collection_class(marker_type)
         offset_transform = self._space_transform(ax, offset_space)
         transform = self._space_transform(ax, transform_space)
         collection = collection_cls(offset_transform=offset_transform, **kwargs)
@@ -589,11 +574,11 @@ class MplBackend:
     def set_autoscale(self, ax, enable):
         ax.autoscale(enable)
 
-    def set_xticklabels(self, ax, labels):
-        ax.set_xticklabels(labels)
-
-    def set_yticklabels(self, ax, labels):
-        ax.set_yticklabels(labels)
+    def set_ticklabels(self, ax, axis, labels):
+        if axis == "x":
+            ax.set_xticklabels(labels)
+        else:
+            ax.set_yticklabels(labels)
 
     # ── Layout helpers ────────────────────────────────────────────────────
 
@@ -620,15 +605,7 @@ class MplBackend:
 
         return ImagePlot(title=title)
 
-    # ── Scale bar ─────────────────────────────────────────────────────────
-
-    def create_scalebar(self, ax, units, **kwargs):
-        from hyperspy.drawing._widgets.scalebar import ScaleBar
-
-        return ScaleBar(ax=ax, units=units, **kwargs)
-
-    def remove_scalebar(self, ax, handle):
-        handle.remove()
+    # create_scalebar / remove_scalebar: BackendBase defaults (generic ScaleBar).
 
     # ── Image helpers ─────────────────────────────────────────────────────
 

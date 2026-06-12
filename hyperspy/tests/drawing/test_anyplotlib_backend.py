@@ -186,19 +186,18 @@ class TestLine1D:
         h = backend.plot_line(ax, np.arange(5, dtype=float), np.zeros(5))
         backend.remove_line(ax, h)  # should be a no-op, not raise
 
-    def test_line_get_xdata(self, backend, fig_ax):
+    def test_get_line_props_xdata(self, backend, fig_ax):
         _, ax = fig_ax
         x = np.linspace(0.5, 4.5, 40)
         h = backend.plot_line(ax, x, np.zeros(40))
-        xdata = backend.line_get_xdata(h)
-        np.testing.assert_allclose(xdata, x)
+        np.testing.assert_allclose(backend.get_line_props(h)["xdata"], x)
 
-    def test_line_get_color(self, backend, fig_ax):
+    def test_get_line_props_color(self, backend, fig_ax):
         _, ax = fig_ax
         h = backend.plot_line(
             ax, np.arange(5, dtype=float), np.zeros(5), color="#aabbcc"
         )
-        assert backend.line_get_color(h) == "#aabbcc"
+        assert backend.get_line_props(h)["color"] == "#aabbcc"
 
 
 class TestImage2D:
@@ -836,18 +835,16 @@ class TestNativeMarkers:
 
     # ── unsupported type raises BackendCapabilityError ────────────────────
 
-    def test_unsupported_type_raises(self, backend, plot1d_ax):
+    def test_unknown_type_raises(self, backend, plot1d_ax):
         from hyperspy.drawing.backends._protocol import BackendCapabilityError
 
         with pytest.raises(BackendCapabilityError):
             backend.create_markers(
                 plot1d_ax,
-                "arrows",  # arrows not supported on Plot1D
+                "hexagons",  # not an anyplotlib marker type
                 offset_space="data",
                 transform_space="display",
                 offsets=[[1, 1]],
-                U=[1],
-                V=[1],
             )
 
     # ── Signal integration ────────────────────────────────────────────────

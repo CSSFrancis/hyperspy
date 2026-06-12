@@ -29,11 +29,12 @@ Backend-agnostic interactive plotting engine.  Handles the `signal.plot()` infra
 
 | File | Description |
 |------|-------------|
-| `backends/_protocol.py` | `PlottingBackend` Protocol + `BackendCapabilityError` + `BlitMixin` + `PointerMixin` |
+| `backends/_protocol.py` | `PlottingBackend` Protocol + `BackendBase` (inherit this!) + `BackendCapabilityError` + `@unsupported` + `BlitMixin` / `PointerMixin` |
 | `backends/_registry.py` | Entry-point discovery via `importlib.metadata` |
-| `backends/__init__.py` | `get_backend()` / `register_backend()` |
+| `backends/__init__.py` | `get_backend()` / `register_backend()` + public re-exports |
 | `backends/_stub.py` | Fully documented template for new backend authors |
-| `backends/mpl/` | Matplotlib backend (default) |
+| `backends/testing.py` | Public conformance suite (`BackendConformanceSuite`, `check_backend`, `PROTOCOL_METHODS`) — run by third-party backends in their own CI |
+| `backends/mpl/` | Matplotlib backend (default); `_collections.py` holds the single marker-type→MPL-class map and legacy serialization helpers |
 | `backends/anyplotlib/` | anyplotlib backend |
 | `backends/_magic.py` | `%anyplotlib` IPython magic |
 
@@ -50,11 +51,17 @@ Backend-agnostic interactive plotting engine.  Handles the `signal.plot()` infra
    [project.entry-points."hyperspy.backends"]
    mybackend = "hyperspy_mybackend.backend:MyBackend"
    ```
-2. Implement every method in `backends/_protocol.py`.  Copy `backends/_stub.py` as your starting point — all REQUIRED methods are clearly marked.
-3. **Override `get_explorer`** — return the appropriate `HyperExplorer` subclass for each signal dimension.  The base class default is broken.  Subclass `HyperSignal1D_Explorer` + `HyperImage_Explorer` for 1D/2D; use `HyperExplorer` for 0D.  See `backends/anyplotlib/_explorers.py`.
-4. **Handle `_on_figure_window_close`** — `BlittedFigure.create_figure` forwards this kwarg to `backend.create_figure`.  Store it on your figure object and call it from `close_figure` so the HyperExplorer's `close()` fires when the window is destroyed.  See `AnyplotlibBackend.create_figure` for the reference implementation.
-5. Your axes objects must accept arbitrary attribute assignment (`ax.hspy_fig = ...`, `ax.figure = ...`); `signal1d.py` and `image.py` set these automatically.
-6. Verify: `isinstance(MyBackend(), PlottingBackend)` and `pytest hyperspy/tests/drawing/`.
+2. Subclass `BackendBase` and implement the REQUIRED core primitives.  Copy `backends/_stub.py` as your starting point — everything optional (pointers, markers, selectors, blitting, explorer/figure factories) is inherited as a safe default and can be added incrementally.  Mark features your library cannot provide with `@unsupported` so `backend.supports(feature)` reports them.
+3. **Handle `_on_figure_window_close`** — `BlittedFigure.create_figure` forwards this kwarg to `backend.create_figure`.  Store it on your figure object and call it from `close_figure` so the HyperExplorer's `close()` fires when the window is destroyed.  See `AnyplotlibBackend.create_figure` for the reference implementation.
+4. Your axes objects must accept arbitrary attribute assignment (`ax.hspy_fig = ...`, `ax.figure = ...`); `signal1d.py` and `image.py` set these automatically.
+5. Verify with the public conformance suite in your package's tests:
+   ```python
+   from hyperspy.drawing.backends.testing import BackendConformanceSuite
+
+   class TestMyBackendConformance(BackendConformanceSuite):
+       backend_factory = MyBackend
+   ```
+   The generic `Hyper*Explorer` classes returned by `BackendBase.get_explorer` work with any conformant backend; override `get_explorer` only for backend-specific layout (see `backends/anyplotlib/_explorers.py`).
 
 ### Figure close callback threading
 
@@ -89,11 +96,10 @@ External packages — not part of this repository.  Register under the `"hypersp
 
 These items are intentional; a new backend whose axes accept arbitrary attribute assignment will not be broken by them:
 
-- `_markers/` — `HyperMarkerCollection.mpl_collection()` returns a matplotlib `Collection` class; used only on the MPL fallback path.
+- `markers.py` / `marker_collection.py` — matplotlib-import-free (enforced by `test_generic_layer_purity.py`); MPL classes for the fallback path and for legacy file loading are resolved lazily through `backends/mpl/_collections.py` (`mpl_collection()`, `resolve_collection_string()`, `validate_collection_class()`, `is_patch()`).
 - `_widgets/line2d.py`, `_widgets/circle.py` — `plt.Line2D` / `plt.Circle` construction is MPL-only; these widgets raise `BackendCapabilityError` on non-MPL backends.
 - `signal1d.py:add_line` — color-cycle deduplication tries an exact string match first, then falls back to `matplotlib.colors.to_rgba` behind `try/except (ImportError, ValueError)` for canonical RGBA comparison.
 - `signal1d.py:Signal1DLine.plot` — `matplotlib.colors.Normalize` type-check in the norm validation runs only when matplotlib is present; the guard enriches the error message for the common misuse case.
-- `markers.py` — `_is_patch()` helper and legacy string-based collection fallback both guard with `try/except ImportError`.  These exist for backward compatibility with files saved before `HyperMarkerCollection`.
 - `utils.py` — `create_figure`, `plot_RGB_map`, `plot_images`, `animate_legend` are intentionally MPL-specific public API helpers and not part of the generic rendering path.
 
 ## Subdirectories
@@ -109,7 +115,7 @@ These items are intentional; a new backend whose axes accept arbitrary attribute
 ### Working In This Directory
 
 - All rendering goes through the active backend: `get_backend().<method>()`.  **Never call `ax.transData`, `plt.gca()`, `ax.hspy_fig._background = None`, or similar MPL-specific calls from outside `backends/mpl/`.**
-- Use `BackendCapabilityError` for features a backend does not yet support; callers in `markers.py` and `hse.py` degrade gracefully on this exception.
+- Use `BackendCapabilityError` for features a backend does not yet support; callers in `markers.py` and `hse.py` degrade gracefully on this exception.  Mark raising methods with `@unsupported` so `backend.supports(feature)` can report the gap up front; prefer `backend.supports(...)` over try/except when checking before doing expensive setup.
 - Interactive updates rely on `events.py` — do not poll; connect/disconnect event handlers.
 - Use `backend.render_figure_from_ax(ax)` for performance-critical repaints; use `backend.invalidate_blit_background(ax)` before `draw_patch()` when a patch is structurally removed/added.
 - `BlittedFigure._on_close` is idempotent (guarded by `if self.figure is None: return`); it is safe to call it multiple times via re-entrant close paths.

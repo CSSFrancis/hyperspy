@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from hyperspy.drawing.backends._protocol import BackendCapabilityError
+from hyperspy.drawing.backends._protocol import (
+    BackendBase,
+    BackendCapabilityError,
+    unsupported,
+)
 
-_NOT_YET = "anyplotlib does not yet support '{}'. See docs/hyperspy_parity.md."
+_NOT_YET = (
+    "anyplotlib does not yet support '{}'. "
+    "See the feature table in hyperspy/drawing/AGENTS.md."
+)
 
 
 def _unwrap_cycling(value):
@@ -49,11 +56,14 @@ class _AplFigureProxy:
         self._hspy_on_close = None
 
 
-class AnyplotlibBackend:
+class AnyplotlibBackend(BackendBase):
     """Maps hyperspy drawing primitives to anyplotlib API.
 
-    Methods marked with _NOT_YET raise NotImplementedError until the
-    corresponding anyplotlib feature is implemented.
+    Optional features without an anyplotlib equivalent inherit the
+    ``BackendCapabilityError`` defaults from :class:`BackendBase`; the
+    ``@unsupported``-marked methods below are core-protocol gaps with
+    anyplotlib-specific messages.  Query ``backend.supports(feature)``
+    to discover them programmatically.
     """
 
     # ── Figure lifecycle ──────────────────────────────────────────────────
@@ -205,20 +215,7 @@ class AnyplotlibBackend:
         except ImportError:
             pass
 
-    def supports_blit(self, fig) -> bool:
-        return False
-
-    def copy_background(self, fig):
-        return None
-
-    def restore_background(self, fig, background):
-        pass
-
-    def blit(self, fig):
-        pass
-
-    def connect_draw_event(self, fig, fn):
-        return None
+    # Blit methods: BlitMixin no-op defaults (anyplotlib repaints natively).
 
     def disconnect_event(self, fig_or_ax, cid):
         if cid is None:
@@ -226,9 +223,6 @@ class AnyplotlibBackend:
         plot = self._get_plot(fig_or_ax)
         if plot is not None and hasattr(plot, "callbacks"):
             plot.callbacks.disconnect(cid)
-
-    def draw_animated_artists(self, fig):
-        pass
 
     # ── Axes setup ───────────────────────────────────────────────────────
 
@@ -289,9 +283,11 @@ class AnyplotlibBackend:
         if ax._plot is not None and hasattr(ax._plot, "set_aspect"):
             ax._plot.set_aspect(ratio)
 
+    @unsupported
     def add_right_axis(self, ax, color="black"):
         raise BackendCapabilityError(_NOT_YET.format("add_right_axis (twinx)"))
 
+    @unsupported
     def remove_right_axis(self, ax, right_ax):
         raise BackendCapabilityError(_NOT_YET.format("remove_right_axis"))
 
@@ -351,14 +347,12 @@ class AnyplotlibBackend:
                 except (AttributeError, TypeError):
                     pass
 
-    def line_get_xdata(self, handle):
-        return handle.x
-
-    def line_get_color(self, handle):
-        return getattr(handle, "color", "#4fc3f7")
-
-    def line_get_linewidth(self, handle):
-        return float(getattr(handle, "linewidth", 1.5))
+    def get_line_props(self, handle):
+        return {
+            "color": getattr(handle, "color", "#4fc3f7"),
+            "linewidth": float(getattr(handle, "linewidth", 1.5)),
+            "xdata": handle.x,
+        }
 
     # ── Text annotations ─────────────────────────────────────────────────
 
@@ -373,7 +367,7 @@ class AnyplotlibBackend:
             except (TypeError, AttributeError):
                 pass
         # Fall back to a lightweight sentinel that remembers the text content
-        # and colour so that update_text / text_get_color work correctly even
+        # and colour so that update_text / set_text_props work correctly even
         # without native text support.
         return _AplTextHandle(s, kwargs.get("color", "white"))
 
@@ -395,8 +389,11 @@ class AnyplotlibBackend:
         except Exception:
             pass
 
-    def text_set_color(self, handle, color):
+    def set_text_props(self, handle, **props):
         if handle is None:
+            return
+        color = props.get("color")
+        if color is None:
             return
         if isinstance(handle, _AplTextHandle):
             handle.color = color
@@ -405,13 +402,6 @@ class AnyplotlibBackend:
                 handle.set_color(color)
             except Exception:
                 pass
-
-    def text_get_color(self, handle):
-        if handle is None:
-            return "white"
-        if isinstance(handle, _AplTextHandle):
-            return handle.color
-        return getattr(handle, "color", "white")
 
     # ── Generic artist ────────────────────────────────────────────────────
 
@@ -628,60 +618,14 @@ class AnyplotlibBackend:
         if alpha is not None:
             raise BackendCapabilityError(_NOT_YET.format("set_pointer_style(alpha)"))
 
-    def add_artist(self, ax, artist):
-        pass
+    # add_artist, simulate_pick: PointerMixin no-op defaults.
+    # create_rect_patch, get_data_transform_inverse, transform_point,
+    # create_span_selector, create_polygon_selector, get_ax_transform,
+    # convert_coords, create_line2d_patch, create_circle_patch:
+    # PointerMixin @unsupported defaults (raise BackendCapabilityError).
 
-    def create_rect_patch(self, pos, w, h, **kwargs):
-        raise BackendCapabilityError(
-            _NOT_YET.format("create_rect_patch (resizer handles)")
-        )
-
-    def get_data_transform_inverse(self, ax):
-        raise BackendCapabilityError(_NOT_YET.format("get_data_transform_inverse"))
-
-    def transform_point(self, transform, point):
-        raise BackendCapabilityError(_NOT_YET.format("transform_point"))
-
-    # ── Marker collections ────────────────────────────────────────────────
-
-    def add_collection(self, ax, collection):
-        raise BackendCapabilityError(_NOT_YET.format("add_collection (markers)"))
-
-    def collection_update(self, handle, **kwargs):
-        raise BackendCapabilityError(_NOT_YET.format("collection_update (markers)"))
-
-    def collection_remove(self, ax, handle):
-        raise BackendCapabilityError(_NOT_YET.format("collection_remove (markers)"))
-
-    # ── Combined layout / lifecycle hooks ─────────────────────────────────
-
-    def render_figure_from_ax(self, ax):
-        self.draw_idle(getattr(ax, "figure", None))
-
-    def invalidate_blit_background(self, ax):
-        pass  # anyplotlib repaints natively; no blit-background cache to invalidate
-
-    def supports_blit_from_ax(self, ax):
-        return False
-
-    def create_span_selector(self, ax, **kwargs):
-        raise BackendCapabilityError(_NOT_YET.format("create_span_selector"))
-
-    def create_polygon_selector(self, ax, **kwargs):
-        raise BackendCapabilityError(_NOT_YET.format("create_polygon_selector"))
-
-    def get_ax_transform(self, ax, kind):
-        raise BackendCapabilityError(_NOT_YET.format(f"get_ax_transform({kind!r})"))
-
-    # connect_widget_drag implemented above; declared here for protocol completeness
-
-    def simulate_pick(self, ax, patch):
-        pass  # anyplotlib handles selection natively; no MPL pick simulation needed
-
-    # ── Coordinate conversion ─────────────────────────────────────────────
-
-    def convert_coords(self, ax, points, from_space, to_space):
-        raise BackendCapabilityError(_NOT_YET.format("convert_coords"))
+    # add_collection / collection_update / collection_remove: BackendBase
+    # @unsupported defaults — anyplotlib renders markers natively instead.
 
     # ── Native marker collections ─────────────────────────────────────────
 
@@ -831,7 +775,7 @@ class AnyplotlibBackend:
 
         return out
 
-    # ── New protocol methods (not yet implemented by anyplotlib) ──────────
+    # ── Misc primitives ────────────────────────────────────────────────────
 
     def plot_step(self, ax, x, y, **props):
         # anyplotlib has no dedicated step plot API; fall back to plot_line.
@@ -839,23 +783,11 @@ class AnyplotlibBackend:
         props.pop("drawstyle", None)
         return self.plot_line(ax, x, y, **props)
 
-    def create_line2d_patch(self, x, y, **kwargs):
-        raise BackendCapabilityError(_NOT_YET.format("create_line2d_patch"))
-
-    def create_circle_patch(self, xy, radius, **kwargs):
-        raise BackendCapabilityError(_NOT_YET.format("create_circle_patch"))
-
     def set_autoscale(self, ax, enable):
         pass  # anyplotlib manages zoom internally
 
-    def set_xticklabels(self, ax, labels):
+    def set_ticklabels(self, ax, axis, labels):
         pass  # cosmetic; anyplotlib tick control not yet exposed
-
-    def set_yticklabels(self, ax, labels):
-        pass  # cosmetic; anyplotlib tick control not yet exposed
-
-    def tight_layout(self, fig):
-        pass  # anyplotlib uses constrained layout automatically
 
     def get_figure_from_ax(self, ax):
         # For MPL-fallback axes (used until native anyplotlib figures exist),
@@ -865,20 +797,13 @@ class AnyplotlibBackend:
             return fig
         raise BackendCapabilityError(_NOT_YET.format("get_figure_from_ax"))
 
-    def connect_close_event(self, fig, fn):
-        # anyplotlib close handling is done via on_close= kwarg at figure
-        # creation time; there is no post-hoc connect mechanism yet.
-        return None
+    # connect_close_event: BackendBase default (returns None) — anyplotlib
+    # close handling is done via the on_close= kwarg at figure creation time.
+    # create_signal1d_figure / create_image_figure / create_scalebar /
+    # remove_scalebar: BackendBase defaults (generic figure managers).
 
     def get_explorer(self, signal_dim):
-        # Phase 2 will add Apl_Hyper*Explorer subclasses; for now return the
-        # generic base classes which work with any backend that implements the
-        # required primitives.
-        if signal_dim == 0:
-            from hyperspy.drawing.he import HyperExplorer
-
-            return HyperExplorer
-        elif signal_dim == 1:
+        if signal_dim == 1:
             from hyperspy.drawing.backends.anyplotlib._explorers import (
                 Apl_HyperSignal1D_Explorer,
             )
@@ -890,34 +815,8 @@ class AnyplotlibBackend:
             )
 
             return Apl_HyperImage_Explorer
-        raise ValueError(f"Plotting is not supported for signal_dim={signal_dim}.")
-
-    def create_signal1d_figure(self, title="", on_close=None, **kwargs):
-        from hyperspy.drawing.signal1d import Signal1DFigure
-
-        sf = Signal1DFigure(title=title, **kwargs)
-        # Wire the explorer-level close via events so it fires when the
-        # BlittedFigure closes, regardless of whether the backend supports
-        # a native window-close callback (connect_close_event is a no-op here).
-        if on_close is not None:
-            sf.events.closed.connect(lambda: on_close(), [])
-        return sf
-
-    def create_image_figure(self, title="", **kwargs):
-        from hyperspy.drawing.image import ImagePlot
-
-        imf = ImagePlot(title=title)
-        return imf
-
-    def create_scalebar(self, ax, units, **kwargs):
-        # ScaleBar now routes all artist ops through the backend, so it works
-        # on anyplotlib (line is drawn; text label is silently absent).
-        from hyperspy.drawing._widgets.scalebar import ScaleBar
-
-        return ScaleBar(ax=ax, units=units, **kwargs)
-
-    def remove_scalebar(self, ax, handle):
-        pass
+        # 0-D (and the signal_dim validation) use the generic default.
+        return super().get_explorer(signal_dim)
 
     def get_image_cmap_name(self, handle):
         return getattr(handle, "cmap", None) or "gray"
@@ -934,9 +833,9 @@ class _AplTextHandle:
     """Lightweight sentinel for text annotations on backends without native text.
 
     Stores the text content and colour so that ``update_text`` /
-    ``text_get_color`` / ``text_set_color`` remain functional even when the
-    underlying canvas cannot render text.  ``remove_text`` is a no-op because
-    there is nothing on the canvas to remove.
+    ``set_text_props`` remain functional even when the underlying canvas
+    cannot render text.  ``remove_text`` is a no-op because there is nothing
+    on the canvas to remove.
     """
 
     __slots__ = ("s", "color")

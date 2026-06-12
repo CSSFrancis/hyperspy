@@ -20,15 +20,17 @@
 
 ``HyperMarkerCollection`` subclasses describe the *geometry* of a marker set
 without coupling to any rendering backend.  Each subclass bundles three
-things that were previously scattered across the ``Markers`` subclass and
-``MplBackend._marker_collection_map``:
+things that were previously scattered across the ``Markers`` subclasses and
+the MPL backend:
 
 1. ``_marker_type`` — dispatched to ``PlottingBackend.create_markers`` so
    backends (anyplotlib, fastplotlib, …) can render natively.
 2. ``_position_key`` / ``_position_key_to_set`` — the canonical kwarg keys
    for position data, shared by both the storage layer and all backends.
-3. ``mpl_collection()`` — a lazy classmethod returning the MPL Collection
-   class used by ``MplBackend`` on the fallback path.
+3. ``mpl_collection()`` — a lazy classmethod (defined once on the base
+   class) returning the MPL Collection class used on the MPL fallback path,
+   resolved from the single type→class map in
+   ``hyperspy.drawing.backends.mpl._collections``.
 
 Pass a *subclass* (not an instance) to ``Markers(collection=...)``, exactly
 as you would pass a ``matplotlib.collections.Collection`` subclass today.
@@ -64,8 +66,6 @@ class HyperMarkerCollection:
         ``HLinesCollection`` which accept positions as ``"offsets"`` but
         construct the full ``"segments"`` internally.
 
-    Subclasses must also implement :meth:`mpl_collection` to support the
-    ``MplBackend`` fallback path.
     """
 
     _marker_type: str = ""
@@ -84,15 +84,18 @@ class HyperMarkerCollection:
     def mpl_collection(cls):
         """Return the MPL Collection class for the fallback rendering path.
 
+        Resolved from ``_marker_type`` via the single type→class map in
+        :mod:`hyperspy.drawing.backends.mpl._collections`, keeping the
+        descriptors free of matplotlib imports.
+
         Returns
         -------
         type
             A subclass of :class:`matplotlib.collections.Collection`.
         """
-        raise NotImplementedError(
-            f"{cls.__name__} must implement mpl_collection() "
-            "to support the MplBackend fallback path."
-        )
+        from hyperspy.drawing.backends.mpl._collections import get_collection_class
+
+        return get_collection_class(cls._marker_type)
 
     @staticmethod
     def is_hyper_collection(obj) -> bool:
@@ -130,25 +133,11 @@ class PointsCollection(HyperMarkerCollection):
     _marker_type = "points"
     _position_key = "offsets"
 
-    @classmethod
-    def mpl_collection(cls):
-        from hyperspy.external.matplotlib.collections import CircleCollection
-
-        return CircleCollection
-
-
 class CirclesCollection(HyperMarkerCollection):
     """Descriptor for circle markers with explicit radii (data-space sized)."""
 
     _marker_type = "circles"
     _position_key = "offsets"
-
-    @classmethod
-    def mpl_collection(cls):
-        from hyperspy.external.matplotlib.collections import CircleCollection
-
-        return CircleCollection
-
 
 class SquaresCollection(HyperMarkerCollection):
     """Descriptor for square markers with explicit widths."""
@@ -156,25 +145,11 @@ class SquaresCollection(HyperMarkerCollection):
     _marker_type = "squares"
     _position_key = "offsets"
 
-    @classmethod
-    def mpl_collection(cls):
-        from hyperspy.external.matplotlib.collections import SquareCollection
-
-        return SquareCollection
-
-
 class LinesCollection(HyperMarkerCollection):
     """Descriptor for arbitrary line segment markers (segments key)."""
 
     _marker_type = "lines"
     _position_key = "segments"
-
-    @classmethod
-    def mpl_collection(cls):
-        from matplotlib.collections import LineCollection
-
-        return LineCollection
-
 
 class VLinesCollection(HyperMarkerCollection):
     """Descriptor for vertical line markers spanning the full axes height.
@@ -187,13 +162,6 @@ class VLinesCollection(HyperMarkerCollection):
     _position_key = "offsets"
     _position_key_to_set = "segments"
 
-    @classmethod
-    def mpl_collection(cls):
-        from matplotlib.collections import LineCollection
-
-        return LineCollection
-
-
 class HLinesCollection(HyperMarkerCollection):
     """Descriptor for horizontal line markers spanning the full axes width.
 
@@ -205,25 +173,11 @@ class HLinesCollection(HyperMarkerCollection):
     _position_key = "offsets"
     _position_key_to_set = "segments"
 
-    @classmethod
-    def mpl_collection(cls):
-        from matplotlib.collections import LineCollection
-
-        return LineCollection
-
-
 class TextsCollection(HyperMarkerCollection):
     """Descriptor for text annotation markers."""
 
     _marker_type = "texts"
     _position_key = "offsets"
-
-    @classmethod
-    def mpl_collection(cls):
-        from hyperspy.external.matplotlib.collections import TextCollection
-
-        return TextCollection
-
 
 class RectanglesCollection(HyperMarkerCollection):
     """Descriptor for rectangle markers with explicit widths and heights."""
@@ -231,25 +185,11 @@ class RectanglesCollection(HyperMarkerCollection):
     _marker_type = "rectangles"
     _position_key = "offsets"
 
-    @classmethod
-    def mpl_collection(cls):
-        from hyperspy.external.matplotlib.collections import RectangleCollection
-
-        return RectangleCollection
-
-
 class EllipsesCollection(HyperMarkerCollection):
     """Descriptor for ellipse markers with explicit widths, heights, and angles."""
 
     _marker_type = "ellipses"
     _position_key = "offsets"
-
-    @classmethod
-    def mpl_collection(cls):
-        from hyperspy.external.matplotlib.collections import EllipseCollection
-
-        return EllipseCollection
-
 
 class PolygonsCollection(HyperMarkerCollection):
     """Descriptor for polygon markers defined by explicit vertex lists."""
@@ -257,21 +197,8 @@ class PolygonsCollection(HyperMarkerCollection):
     _marker_type = "polygons"
     _position_key = "verts"
 
-    @classmethod
-    def mpl_collection(cls):
-        from matplotlib.collections import PolyCollection
-
-        return PolyCollection
-
-
 class ArrowsCollection(HyperMarkerCollection):
     """Descriptor for arrow / quiver markers."""
 
     _marker_type = "arrows"
     _position_key = "offsets"
-
-    @classmethod
-    def mpl_collection(cls):
-        from hyperspy.external.matplotlib.quiver import Quiver
-
-        return Quiver

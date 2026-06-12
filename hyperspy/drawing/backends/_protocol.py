@@ -40,6 +40,24 @@ class BackendCapabilityError(NotImplementedError):
     """
 
 
+def unsupported(method):
+    """Mark a backend method as not supported by that backend.
+
+    The decorated method should raise :class:`BackendCapabilityError` when
+    called.  :meth:`BackendBase.supports` reports ``False`` for any feature
+    whose resolved implementation carries this marker, so UI layers can
+    disable affordances up front instead of catching the error after the
+    fact::
+
+        class MyBackend(BackendBase):
+            @unsupported
+            def create_span_selector(self, ax, **kwargs):
+                raise BackendCapabilityError("no span selector")
+    """
+    method.__hyperspy_unsupported__ = True
+    return method
+
+
 class BlitMixin(Protocol):
     """Default no-op implementations of all blit-related methods.
 
@@ -116,6 +134,7 @@ class PointerMixin(Protocol):
 
     # ── Pointer creation / update ─────────────────────────────────────────
 
+    @unsupported
     def create_line_pointer(
         self, ax: Any, axis: str, pos: float, color: str = "red"
     ) -> Any:
@@ -136,12 +155,14 @@ class PointerMixin(Protocol):
             "create_line_pointer not supported by this backend"
         )
 
+    @unsupported
     def update_line_pointer(self, handle: Any, pos: float) -> None:
         """Move the line pointer to *pos* in data coordinates."""
         raise BackendCapabilityError(
             "update_line_pointer not supported by this backend"
         )
 
+    @unsupported
     def create_rect_pointer(
         self, ax: Any, x: float, y: float, w: float, h: float, color: str = "red"
     ) -> Any:
@@ -150,6 +171,7 @@ class PointerMixin(Protocol):
             "create_rect_pointer not supported by this backend"
         )
 
+    @unsupported
     def update_rect_pointer(
         self, handle: Any, x: float, y: float, w: float, h: float
     ) -> None:
@@ -181,16 +203,19 @@ class PointerMixin(Protocol):
     def add_artist(self, ax: Any, artist: Any) -> None:
         """Add a pre-created artist to ax (used for MPL-native patches)."""
 
+    @unsupported
     def create_rect_patch(self, pos, w: float, h: float, **kwargs) -> Any:
         """Create a rectangle patch (for resizer handles)."""
         raise BackendCapabilityError("create_rect_patch not supported by this backend")
 
+    @unsupported
     def get_data_transform_inverse(self, ax: Any) -> Any:
         """Return an inverse-data transform (for pixel→data conversions)."""
         raise BackendCapabilityError(
             "get_data_transform_inverse not supported by this backend"
         )
 
+    @unsupported
     def transform_point(self, transform: Any, point) -> Any:
         """Apply transform to point."""
         raise BackendCapabilityError("transform_point not supported by this backend")
@@ -210,10 +235,12 @@ class PointerMixin(Protocol):
 
     # ── Interactive selectors ─────────────────────────────────────────────
 
+    @unsupported
     def create_span_selector(self, ax: Any, **kwargs) -> Any:
         """Create and return an interactive span selector on ax."""
         raise BackendCapabilityError("SpanSelector requires a matplotlib-based backend")
 
+    @unsupported
     def create_polygon_selector(self, ax: Any, **kwargs) -> Any:
         """Create and return an interactive polygon selector on ax."""
         raise BackendCapabilityError(
@@ -222,6 +249,7 @@ class PointerMixin(Protocol):
 
     # ── Coordinate transforms ─────────────────────────────────────────────
 
+    @unsupported
     def get_ax_transform(self, ax: Any, kind: str) -> Any:
         """Return a transform for the given kind.
 
@@ -234,12 +262,14 @@ class PointerMixin(Protocol):
 
     # ── Free-form patch creation ──────────────────────────────────────────
 
+    @unsupported
     def create_line2d_patch(self, x, y, **kwargs) -> Any:
         """Create a free-form line artist for use as a widget patch."""
         raise BackendCapabilityError(
             "create_line2d_patch not supported by this backend"
         )
 
+    @unsupported
     def create_circle_patch(self, xy, radius, **kwargs) -> Any:
         """Create a circle artist for use as a widget patch."""
         raise BackendCapabilityError(
@@ -248,6 +278,7 @@ class PointerMixin(Protocol):
 
     # ── Coordinate conversion ─────────────────────────────────────────────
 
+    @unsupported
     def convert_coords(
         self,
         ax: Any,
@@ -275,6 +306,7 @@ class PointerMixin(Protocol):
 
     # ── Native marker collections ─────────────────────────────────────────
 
+    @unsupported
     def create_markers(self, ax: Any, marker_type: str, **kwargs) -> Any:
         """Create a marker collection on *ax* and return an opaque handle.
 
@@ -299,6 +331,7 @@ class PointerMixin(Protocol):
         """
         raise BackendCapabilityError("create_markers not supported by this backend")
 
+    @unsupported
     def update_markers(self, handle: Any, **kwargs) -> None:
         """Update a marker collection returned by ``create_markers``."""
         raise BackendCapabilityError("update_markers not supported by this backend")
@@ -308,6 +341,7 @@ class PointerMixin(Protocol):
 
     # ── Step plot ─────────────────────────────────────────────────────────
 
+    @unsupported
     def plot_step(self, ax: Any, x, y, **props) -> Any:
         """Draw a step plot; return an opaque handle."""
         raise BackendCapabilityError("plot_step not supported by this backend")
@@ -317,11 +351,11 @@ class PointerMixin(Protocol):
     def set_autoscale(self, ax: Any, enable: bool) -> None:
         """Enable or disable axes autoscale."""
 
-    def set_xticklabels(self, ax: Any, labels) -> None:
-        """Set the x-axis tick labels."""
+    def set_ticklabels(self, ax: Any, axis: str, labels) -> None:
+        """Set the tick labels on one axis.
 
-    def set_yticklabels(self, ax: Any, labels) -> None:
-        """Set the y-axis tick labels."""
+        *axis* is ``'x'`` or ``'y'``; an empty *labels* list hides them.
+        """
 
 
 @runtime_checkable
@@ -343,6 +377,15 @@ class PlottingBackend(BlitMixin, PointerMixin, Protocol):
     calls.  The generic drawing layer never imports matplotlib or anyplotlib
     directly; it calls only these methods.
     """
+
+    # ── Capability discovery ──────────────────────────────────────────────
+
+    def supports(self, feature: str) -> bool:
+        """Return whether *feature* (a protocol method name) is functional.
+
+        See :meth:`BackendBase.supports` for the reference implementation.
+        """
+        ...
 
     # ── Figure lifecycle ──────────────────────────────────────────────────
 
@@ -386,9 +429,13 @@ class PlottingBackend(BlitMixin, PointerMixin, Protocol):
     def update_line(self, handle: Any, x, y) -> None: ...
     def remove_line(self, ax: Any, handle: Any) -> None: ...
     def set_line_props(self, handle: Any, **props) -> None: ...
-    def line_get_xdata(self, handle: Any): ...
-    def line_get_color(self, handle: Any) -> str: ...
-    def line_get_linewidth(self, handle: Any) -> float: ...
+
+    def get_line_props(self, handle: Any) -> dict:
+        """Return the current line properties as a dict.
+
+        Must include at least ``'color'`` and ``'linewidth'``.
+        """
+        ...
 
     # ── Text annotations ─────────────────────────────────────────────────
 
@@ -403,8 +450,10 @@ class PlottingBackend(BlitMixin, PointerMixin, Protocol):
 
     def update_text(self, handle: Any, s: str) -> None: ...
     def remove_text(self, ax: Any, handle: Any) -> None: ...
-    def text_set_color(self, handle: Any, color) -> None: ...
-    def text_get_color(self, handle: Any) -> str: ...
+
+    def set_text_props(self, handle: Any, **props) -> None:
+        """Set style properties (``color``, …) on a text handle."""
+        ...
 
     # ── Generic artist property ───────────────────────────────────────────
 
@@ -558,3 +607,143 @@ class PlottingBackend(BlitMixin, PointerMixin, Protocol):
         raise BackendCapabilityError(
             "get_image_cmap_name not supported by this backend"
         )
+
+
+class BackendBase(BlitMixin, PointerMixin):
+    """Concrete base class for plotting backends.
+
+    Inherit this to get:
+
+    * safe no-op blit defaults (:class:`BlitMixin`),
+    * ``BackendCapabilityError`` defaults for all optional pointer / marker /
+      selector primitives (:class:`PointerMixin`),
+    * working defaults for the figure-manager factories, explorers, scale bar
+      and layout hooks (below), and
+    * capability discovery via :meth:`supports`.
+
+    What remains for a subclass are the **required core drawing primitives**:
+    figure lifecycle, axes setup, lines, text, images, colorbars and event
+    connections.  :mod:`hyperspy.drawing.backends._stub` lists them all as a
+    copy-paste template, and
+    :class:`hyperspy.drawing.backends.testing.BackendConformanceSuite` checks
+    a finished backend against the protocol.
+    """
+
+    # ── Capability discovery ──────────────────────────────────────────────
+
+    def supports(self, feature: str) -> bool:
+        """Return whether *feature* (a protocol method name) is functional.
+
+        ``False`` when the backend does not define the method, or when the
+        resolved implementation is marked with :func:`unsupported` (meaning
+        it raises :class:`BackendCapabilityError` when called).  Partially
+        supported methods (e.g. a ``create_line_pointer`` that handles
+        ``axis='x'`` only) report ``True``; the unsupported subset still
+        raises ``BackendCapabilityError`` at call time.
+
+        Blit capability is figure-dependent — query ``supports_blit(fig)``
+        instead of ``supports('blit')``.
+        """
+        impl = getattr(type(self), feature, None)
+        if impl is None or not callable(impl):
+            return False
+        return not getattr(impl, "__hyperspy_unsupported__", False)
+
+    # ── Optional core defaults ────────────────────────────────────────────
+
+    def tight_layout(self, fig: Any) -> None:
+        """Apply tight_layout to fig (best-effort hint; no-op by default)."""
+
+    def create_combined_figure_panels(self, figsize=None) -> tuple[Any, Any] | None:
+        """Return (nav_fig, signal_fig) for a combined layout; None = separate."""
+        return None
+
+    def ensure_displayed(self, fig: Any) -> None:
+        """Force the final render after plot() completes (deferred backends)."""
+
+    def connect_close_event(self, fig: Any, fn: Callable) -> Any:
+        """Connect *fn* to the figure close/destroy event; return a cid."""
+        return None
+
+    @unsupported
+    def get_figure_from_ax(self, ax: Any) -> Any:
+        """Return the parent figure of ax."""
+        raise BackendCapabilityError("get_figure_from_ax not supported by this backend")
+
+    @unsupported
+    def get_image_cmap_name(self, handle: Any) -> str:
+        """Return the colormap name string for an image handle."""
+        raise BackendCapabilityError(
+            "get_image_cmap_name not supported by this backend"
+        )
+
+    # ── Legacy MPL marker collections ─────────────────────────────────────
+    # Only the matplotlib backend can render pre-built MPL Collection
+    # objects; backends provide native markers via create_markers instead.
+
+    @unsupported
+    def add_collection(self, ax: Any, collection) -> Any:
+        raise BackendCapabilityError("add_collection not supported by this backend")
+
+    @unsupported
+    def collection_update(self, handle: Any, **kwargs) -> None:
+        raise BackendCapabilityError(
+            "collection_update not supported by this backend"
+        )
+
+    @unsupported
+    def collection_remove(self, ax: Any, handle: Any) -> None:
+        raise BackendCapabilityError(
+            "collection_remove not supported by this backend"
+        )
+
+    # ── Generic figure-manager / explorer factories ───────────────────────
+    #
+    # Signal1DFigure, ImagePlot, ScaleBar and the Hyper*Explorer classes all
+    # route their drawing through the active backend, so any conformant
+    # backend can use them as-is.  Override only for backend-specific layout.
+
+    def get_explorer(self, signal_dim: int) -> type[HyperExplorer]:
+        from hyperspy.drawing.he import HyperExplorer
+        from hyperspy.drawing.hie import HyperImage_Explorer
+        from hyperspy.drawing.hse import HyperSignal1D_Explorer
+
+        explorers = {
+            0: HyperExplorer,
+            1: HyperSignal1D_Explorer,
+            2: HyperImage_Explorer,
+        }
+        if signal_dim not in explorers:
+            raise ValueError(
+                f"Plotting is not supported for signal_dim={signal_dim}. "
+                "Try s.transpose(signal_axes=1).plot() for 1D or "
+                "s.transpose(signal_axes=(1,2)).plot() for 2D."
+            )
+        return explorers[signal_dim]
+
+    def create_signal1d_figure(self, title: str = "", on_close=None, **kwargs) -> Any:
+        from hyperspy.drawing.signal1d import Signal1DFigure
+
+        sf = Signal1DFigure(title=title, **kwargs)
+        # Wire the explorer-level close via events so it fires when the
+        # BlittedFigure closes, even when the backend has no native
+        # window-close callback (connect_close_event returns None).
+        if on_close is not None:
+            sf.events.closed.connect(lambda: on_close(), [])
+        return sf
+
+    def create_image_figure(self, title: str = "", **kwargs) -> Any:
+        from hyperspy.drawing.image import ImagePlot
+
+        return ImagePlot(title=title)
+
+    def create_scalebar(self, ax: Any, units: str, **kwargs) -> Any:
+        from hyperspy.drawing._widgets.scalebar import ScaleBar
+
+        return ScaleBar(ax=ax, units=units, **kwargs)
+
+    def remove_scalebar(self, ax: Any, handle: Any) -> None:
+        try:
+            handle.remove()
+        except Exception:
+            pass

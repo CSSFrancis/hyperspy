@@ -443,7 +443,7 @@ class Signal1DLine(object):
                 s=str(self.axes_manager.indices),
                 transform="axes",
                 fontsize=12,
-                color=backend.line_get_color(self.line),
+                color=backend.get_line_props(self.line)["color"],
             )
         self._y_min, self._y_max = backend.get_ylim(self.ax)
         backend.render_figure_from_ax(self.ax)

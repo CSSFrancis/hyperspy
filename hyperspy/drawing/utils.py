@@ -1404,8 +1404,8 @@ def set_axes_decor(ax, axes_decor):
     elif axes_decor is None:
         backend.set_xlabel(ax, "")
         backend.set_ylabel(ax, "")
-        backend.set_xticklabels(ax, [])
-        backend.set_yticklabels(ax, [])
+        backend.set_ticklabels(ax, "x", [])
+        backend.set_ticklabels(ax, "y", [])
 
 
 def make_cmap(colors, name="my_colormap", position=None, bit=False, register=True):

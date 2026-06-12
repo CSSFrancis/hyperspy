@@ -42,6 +42,10 @@ GENERIC_FILES = [
     "hyperspy/drawing/_widgets/vertical_line.py",
     "hyperspy/drawing/_widgets/horizontal_line.py",
     "hyperspy/drawing/_widgets/scalebar.py",
+    # Marker layer: MPL classes are resolved through
+    # backends/mpl/_collections.py, never imported here.
+    "hyperspy/drawing/markers.py",
+    "hyperspy/drawing/marker_collection.py",
 ]
 
 

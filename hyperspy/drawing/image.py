@@ -323,8 +323,8 @@ class ImagePlot(AbstractImageFigure):
         backend.set_xlabel(self.ax, self._xlabel)
         backend.set_ylabel(self.ax, self._ylabel)
         if self.axes_ticks is False:
-            backend.set_xticklabels(self.ax, [])
-            backend.set_yticklabels(self.ax, [])
+            backend.set_ticklabels(self.ax, "x", [])
+            backend.set_ticklabels(self.ax, "y", [])
         self.ax.hspy_fig = self
         if self.axes_off:
             backend.set_axis_off(self.ax)
