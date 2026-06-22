@@ -1083,10 +1083,22 @@ class CachedDaskArray:
                     )
             if return_future:
                 return future
-            if force_compute or np.all([c.done() for c in self.core_cached_blocks]):
+            if force_compute:
+                # Explicit blocking compute (e.g. a non-interactive caller that
+                # needs the numpy array now). Safe: nothing else is racing the
+                # cache for this signal.
                 return future.result()
-            else:
-                return future
+            # Interactive path (force_compute=False): NEVER block on the freshly
+            # submitted get_inds future, even when the core blocks are already
+            # done(). That synchronous future.result() used to be entered on a
+            # cache HIT (np.all(blocks.done())) -- but get_inds is a NEW worker
+            # task, so .result() waits on it, and a concurrent navigator move
+            # that evicts/releases a core block it depends on kills it
+            # ("get_inds-... cancelled: lost dependencies"), raising right here.
+            # Returning the future lets the caller poll it asynchronously (the
+            # plot's latest-future staleness guard drops superseded frames); a
+            # resident-block future resolves almost immediately anyway.
+            return future
 
         elif distributed_installed and self.client is not None:
             for i, c in enumerate(self.core_cached_blocks):
