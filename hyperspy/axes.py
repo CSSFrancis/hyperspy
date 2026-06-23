@@ -348,6 +348,8 @@ class BaseDataAxis(t.HasTraits):
     def _index_changed(self, name, old, new):
         self.events.index_changed.trigger(obj=self, index=self.index)
         if not self._suppress_update_value:
+            if self.axis is None:
+                return
             new_value = self.axis[self.index]
             if new_value != self.value:
                 self.value = new_value

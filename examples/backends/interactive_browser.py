@@ -111,7 +111,7 @@ vlines = hs.plot.markers.VerticalLines(
     colors="#FF6400CC",
     linewidths=2.0,
 )
-s.add_marker(vlines, permanent=True)
+s.add_marker(vlines, permanent=True, plot_marker=False)
 
 # %%
 # Plot — click ⚡ to make it live
@@ -129,4 +129,5 @@ try:
     hs.preferences.Plot.backend = "matplotlib"
 except ImportError:
     print("anyplotlib not installed — falling back to matplotlib.")
+    hs.preferences.Plot.backend = "matplotlib"
     s.plot()
