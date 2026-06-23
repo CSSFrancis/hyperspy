@@ -714,8 +714,11 @@ def _get_navigation_dimension_chunk_slice(
     """
 
     n_dim = navigation_indices.shape[1]
+    # Valid block indices on each axis are 0 .. len(c)-1 (len(c) chunks), so the
+    # grid must be np.arange(0, len(c)). The previous `len(c) - 1` dropped the last
+    # chunk from the valid-block grid.
     block_indexes = np.meshgrid(
-        *[np.arange(0, len(c) - 1) for c, n in zip(chunks, range(n_dim))]
+        *[np.arange(0, len(c)) for c, n in zip(chunks, range(n_dim))]
     )  # only for n_dim
     cum_sum_chunks = [np.cumsum(chunks) for chunks in chunks]
     if n_dim == 0:
@@ -729,8 +732,18 @@ def _get_navigation_dimension_chunk_slice(
             navigation_indices,
         )
     else:
-        block_indexes_flat = np.array(block_indexes).reshape(-1, n_dim)
-        block_indexes_flat = block_indexes_flat
+        # Flatten the per-axis meshgrid into (N, n_dim) coordinate rows. The old
+        # `np.array(block_indexes).reshape(-1, n_dim)` is WRONG when the axes have
+        # different numbers of chunks (a non-square block grid, e.g. 5 y-chunks ×
+        # 11 x-chunks): the reshape interleaves the y/x index spaces so the y
+        # column wrongly contained x indices, and the surrounding-block validity
+        # filter `np.isin(surr_y, valid_y)` then accepted an out-of-range y-block
+        # → array.blocks[len(c)] → "Index N out of bounds for axis 0 with size N"
+        # on every cross-chunk move to a non-square scan's edge chunk. Ravel each
+        # meshgrid array and stack columns instead.
+        block_indexes_flat = np.stack(
+            [np.asarray(m).ravel() for m in block_indexes], axis=-1
+        )
 
     blocks = np.array(
         [
