@@ -112,3 +112,45 @@ else:
                 "`--mpl` flag can't not be used because the "
                 "baseline images are not packaged."
             )
+
+    # Work around a pytest-mpl + pytest-rerunfailures interaction.
+    #
+    # pytest-mpl stores the figure returned by a test by replacing
+    # ``item.obj`` with a wrapper in ``wrap_figure_interceptor`` (called from
+    # its ``pytest_runtest_call`` hook).  That wrapper saves the wrapped
+    # function's return value in ``plugin.return_value`` but does *not* return
+    # it.  When ``pytest-rerunfailures`` reruns a failed test (the CI uses
+    # ``--reruns 3``), the hook runs again on the *already wrapped*
+    # ``item.obj``: the new wrapper now stores the inner wrapper's return value,
+    # which is ``None``.  pytest-mpl then calls ``fig.savefig(...)`` on that
+    # ``None``, raising ``AttributeError: 'NoneType' object has no attribute
+    # 'savefig'`` and masking the real (image-comparison) failure.  This only
+    # surfaces when a plotting test fails its first attempt and is retried, so
+    # it does not depend on the matplotlib version.
+    #
+    # Replace the interceptor with an idempotent, return-preserving version so
+    # the stored figure is always the real object returned by the test.
+    try:
+        import pytest_mpl.plugin as _pytest_mpl_plugin
+
+        def _wrap_figure_interceptor(plugin, item):
+            if _pytest_mpl_plugin.get_compare(item) is None:
+                return
+            # Don't re-wrap on reruns: the existing wrapper already records the
+            # real figure each time the test runs.
+            if getattr(item.obj, "_hs_mpl_intercepted", False):
+                return
+            test_name = _pytest_mpl_plugin.generate_test_name(item)
+            wrapped = item.obj
+
+            def wrapper(*args, **kwargs):
+                result = wrapped(*args, **kwargs)
+                plugin.return_value[test_name] = result
+                return result
+
+            wrapper._hs_mpl_intercepted = True
+            item.obj = wrapper
+
+        _pytest_mpl_plugin.wrap_figure_interceptor = _wrap_figure_interceptor
+    except Exception:  # pragma: no cover - defensive, never fail collection
+        pass
