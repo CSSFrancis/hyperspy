@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from hyperspy.drawing.backends._protocol import BackendCapabilityError
+from hyperspy.drawing.backends._protocol import BackendCapabilityError, TextMarkup
 
 _NOT_YET = "the anyplotlib backend does not support '{}'."
 
@@ -542,6 +542,25 @@ def _figsize_px(figsize, default):
     return (int(figsize[0]), int(figsize[1]))
 
 
+def _texts_tex_lite() -> bool:
+    """Whether the installed anyplotlib typesets and rotates texts markers.
+
+    Rotation threading through ``add_texts`` marks the release that routes
+    ``$...$`` markup through the TeX engine; older releases draw raw
+    strings only.
+    """
+    try:
+        import inspect
+
+        import anyplotlib as _apl
+
+        return "rotation" in inspect.signature(_apl.Plot2D.add_texts).parameters
+    except (ImportError, AttributeError, ValueError):
+        # A missing or older anyplotlib means the capability is absent:
+        # fall back to the safe plain-text declaration.
+        return False
+
+
 class AnyplotlibBackend:
     """Maps hyperspy drawing primitives to the anyplotlib API.
 
@@ -549,6 +568,13 @@ class AnyplotlibBackend:
     does not have, so the caller can fall back (as ``Markers.plot`` does) or
     report it rather than draw the wrong thing.
     """
+
+    # Mathtext labels typeset through anyplotlib's TeX engine and rotation
+    # is honoured when the installed release supports it; older releases
+    # draw raw strings only, so they keep the plain-text declaration and
+    # the marker layer degrades mathtext gracefully instead.
+    text_markup = TextMarkup.TEX_LITE if _texts_tex_lite() else TextMarkup.PLAIN
+    supports_text_rotation = _texts_tex_lite()
 
     # ── Figure lifecycle ──────────────────────────────────────────────────
 
@@ -1692,6 +1718,12 @@ class AnyplotlibBackend:
                     np.asarray(v, dtype=float).tolist() for v in verts
                 ]
 
+        if marker_type == "texts" and "facecolor" in work:
+            # matplotlib's text colour kwarg is `facecolor`; the texts
+            # wire format reads `color` (and would otherwise fall back
+            # to red).
+            work["color"] = work.pop("facecolor")
+
         _STRIP = {"offset_transform", "units", "patches", "drawstyle"}
         for k, v in work.items():
             if k in _STRIP:
@@ -1699,7 +1731,16 @@ class AnyplotlibBackend:
             if k in _CYCLING_KWARGS:
                 out[k] = _unwrap_cycling(v)
             elif hasattr(v, "tolist"):
-                out[k] = v.tolist()  # JSON-serialisable
+                if isinstance(v, np.ndarray) and v.size == 0:
+                    # ``.tolist()`` would flatten e.g. an empty ``(0, 2)``
+                    # offsets array to ``[]`` (shape ``(0,)`` after
+                    # ``np.asarray``), which the wire format rejects as not
+                    # ``(N, 2)``.  Happens when all items of a live marker
+                    # collection are removed.  ``to_wire`` converts the raw
+                    # ndarray losslessly.
+                    out[k] = v
+                else:
+                    out[k] = v.tolist()  # JSON-serialisable
             else:
                 out[k] = v
 

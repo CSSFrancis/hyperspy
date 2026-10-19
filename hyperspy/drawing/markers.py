@@ -16,14 +16,21 @@
 # You should have received a copy of the GNU General Public License
 # along with HyperSpy. If not, see <https://www.gnu.org/licenses/#GPL>.
 
+import logging
 from copy import deepcopy
 
 import numpy as np
 
 from hyperspy.drawing.backends import get_backend
-from hyperspy.drawing.backends._protocol import BackendCapabilityError
+from hyperspy.drawing.backends._protocol import (
+    BackendCapabilityError,
+    MarkerType,
+    TextMarkup,
+)
 from hyperspy.events import Event, Events
 from hyperspy.misc import _markers, dask_utils, utils
+
+_logger = logging.getLogger(__name__)
 
 
 def _is_patch(obj):
@@ -39,6 +46,253 @@ def convert_positions(peaks, signal_axes):
         # indexes need to be reversed
         new_data[..., (-i - 1)] = ax.scale * peaks[..., i] + ax.offset
     return new_data
+
+
+# ── Mathtext-to-plain-text degradation ──────────────────────────────────────
+# Mathtext labels (e.g. eXSpy's X-ray line markers) render natively on the
+# matplotlib backend but garble on backends that only draw raw strings.  The
+# symbol table and the unknown-command fallback (emit the bare name) mirror
+# anyplotlib's JS-side _texRuns engine so degraded labels stay consistent
+# across backends.
+
+_TEXT_SYMBOLS = {
+    "alpha": "α",
+    "beta": "β",
+    "gamma": "γ",
+    "delta": "δ",
+    "epsilon": "ε",
+    "varepsilon": "ε",
+    "zeta": "ζ",
+    "eta": "η",
+    "theta": "θ",
+    "vartheta": "ϑ",
+    "iota": "ι",
+    "kappa": "κ",
+    "lambda": "λ",
+    "mu": "μ",
+    "nu": "ν",
+    "xi": "ξ",
+    "pi": "π",
+    "rho": "ρ",
+    "sigma": "σ",
+    "tau": "τ",
+    "upsilon": "υ",
+    "phi": "φ",
+    "varphi": "φ",
+    "chi": "χ",
+    "psi": "ψ",
+    "omega": "ω",
+    "Gamma": "Γ",
+    "Delta": "Δ",
+    "Theta": "Θ",
+    "Lambda": "Λ",
+    "Xi": "Ξ",
+    "Pi": "Π",
+    "Sigma": "Σ",
+    "Upsilon": "Υ",
+    "Phi": "Φ",
+    "Psi": "Ψ",
+    "Omega": "Ω",
+    "times": "×",
+    "cdot": "·",
+    "pm": "±",
+    "mp": "∓",
+    "deg": "°",
+    "degree": "°",
+    "circ": "°",
+    "AA": "Å",
+    "angstrom": "Å",
+    "infty": "∞",
+    "propto": "∝",
+    "approx": "≈",
+    "sim": "~",
+    "le": "≤",
+    "leq": "≤",
+    "ge": "≥",
+    "geq": "≥",
+    "ne": "≠",
+    "neq": "≠",
+    "rightarrow": "→",
+    "to": "→",
+    "leftarrow": "←",
+    "leftrightarrow": "↔",
+    "partial": "∂",
+    "nabla": "∇",
+    "hbar": "ℏ",
+    "ell": "ℓ",
+    "prime": "′",
+    "sqrt": "√",
+    "sum": "Σ",
+    "int": "∫",
+    "langle": "⟨",
+    "rangle": "⟩",
+}
+
+
+def _read_command_name(s, i):
+    """Read a ``\\command`` name starting at ``s[i] == "\\"``.
+
+    Returns ``(name, index_after)``; a non-letter right after the
+    backslash yields that single character as the name.
+    """
+    j = i + 1
+    if j >= len(s) or not s[j].isalpha():
+        return (s[j] if j < len(s) else ""), j + 1
+    while j < len(s) and s[j].isalpha():
+        j += 1
+    return s[i + 1 : j], j
+
+
+def _read_brace_group(s, i):
+    """Read a brace-balanced ``{...}`` group starting at ``s[i] == "{"``.
+
+    Returns ``(content, index_after)``; an unclosed group yields the rest
+    of the string.
+    """
+    depth = 1
+    j = i + 1
+    start = j
+    while j < len(s):
+        if s[j] == "{":
+            depth += 1
+        elif s[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start:j], j + 1
+        j += 1
+    return s[start:], len(s)
+
+
+def _read_script_token(s, i):
+    """Read the argument of a ``_``/``^`` script starting at ``s[i]``.
+
+    Returns ``(raw_token, index_after)``: a brace group yields its
+    content, a ``\\command`` yields the command including the backslash,
+    anything else yields the single character at ``s[i]``.
+    """
+    if i >= len(s):
+        return "", i
+    if s[i] == "{":
+        return _read_brace_group(s, i)
+    if s[i] == "\\":
+        name, j = _read_command_name(s, i)
+        if name in ("mathrm", "text") and j < len(s) and s[j] == "{":
+            group, end = _read_brace_group(s, j)
+            return "\\" + name + "{" + group + "}", end
+        return ("\\" + name) if name else s[i : i + 2], j
+    return s[i], i + 1
+
+
+def _convert_math_str(seg):
+    """Convert one math segment (without ``$`` delimiters) to plain text."""
+    out = []
+    i = 0
+    n = len(seg)
+    while i < n:
+        ch = seg[i]
+        if ch == "\\" and i + 1 < n and seg[i + 1] == "$":
+            out.append("$")
+            i += 2
+        elif ch == "\\":
+            name, j = _read_command_name(seg, i)
+            if name in ("mathrm", "text") and j < n and seg[j] == "{":
+                group, j = _read_brace_group(seg, j)
+                out.append(_convert_math_str(group))
+            elif name in _TEXT_SYMBOLS:
+                out.append(_TEXT_SYMBOLS[name])
+            else:
+                out.append(name)
+            i = j
+        elif ch in "_^":
+            out.append(ch)
+            token, i = _read_script_token(seg, i + 1)
+            out.append(_convert_math_str(token))
+        elif ch in "{}":
+            # Stray braces carry no plain-text meaning
+            i += 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _find_unescaped_dollar(s, i):
+    """Return the index of the next unescaped ``$`` at or after *i*."""
+    while i < len(s):
+        if s[i] == "\\" and i + 1 < len(s):
+            i += 2
+        elif s[i] == "$":
+            return i
+        else:
+            i += 1
+    return len(s)
+
+
+def _mathtext_to_plain(s):
+    """Convert a mathtext string to readable plain text.
+
+    Supports the pragmatic subset used by scientific labels: ``$...$``
+    segments, ``_{}``/``^{}`` scripts, ``\\mathrm{}``/``\\text{}`` upright
+    groups and the symbol table above.  Unknown ``\\commands`` degrade to
+    the bare name; strings without a ``$`` pass through unchanged, as do
+    non-string values.
+    """
+    if not isinstance(s, str) or "$" not in s:
+        return s
+    out = []
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if ch == "\\" and i + 1 < n and s[i + 1] == "$":
+            out.append("$")
+            i += 2
+        elif ch == "$":
+            j = _find_unescaped_dollar(s, i + 1)
+            out.append(_convert_math_str(s[i + 1 : j]))
+            i = j + 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _any_text_is_mathtext(texts):
+    """Return True when any string in *texts* needs mathtext rendering.
+
+    Accepts flat containers and ragged object arrays; an escaped ``\\$``
+    does not count as mathtext.
+    """
+    if texts is None:
+        return False
+    if isinstance(texts, str):
+        return "$" in texts.replace("\\$", "")
+    if isinstance(texts, np.ndarray):
+        return any(_any_text_is_mathtext(t) for t in texts.flat)
+    if isinstance(texts, (list, tuple)):
+        return any(_any_text_is_mathtext(t) for t in texts)
+    return False
+
+
+def _degrade_texts(texts):
+    """Return a NEW texts container with mathtext converted to plain text.
+
+    Handles flat lists, string ndarrays and ragged object ndarrays
+    (per-navigation lists); the input is never mutated and non-string
+    entries pass through unchanged.
+    """
+    if isinstance(texts, np.ndarray):
+        if texts.dtype == object:
+            out = texts.copy()
+            for idx in np.ndindex(texts.shape):
+                out[idx] = _degrade_texts(texts[idx])
+            return out
+        return np.array(_degrade_texts(texts.tolist())).reshape(texts.shape)
+    if isinstance(texts, list):
+        return [_degrade_texts(t) for t in texts]
+    if isinstance(texts, tuple):
+        return tuple(_degrade_texts(t) for t in texts)
+    return _mathtext_to_plain(texts)
 
 
 class Markers:
@@ -258,6 +512,9 @@ class Markers:
         # Properties
         self._collection = None
         self._using_native_markers = False
+        # Capability-gap warnings are deduplicated per kind so repeated
+        # plot/update cycles do not spam the log (see _warn_capability_once)
+        self._capability_warnings: set = set()
         # used in _initialize_collection
         self._collection_class = collection
         self._signal = None
@@ -700,6 +957,62 @@ class Markers:
 
         return current_keys
 
+    def _kwargs_for_backend(self, only_variable_length=False):
+        """Return the marker kwargs to hand to the active backend.
+
+        Applies the backend's declared text capabilities to ``texts``
+        markers: on a backend that renders plain text only, mathtext
+        labels are converted on a copy of the kwargs; when text rotation
+        is unsupported the rotation and alignment kwargs are dropped.
+        Each degradation warns once per marker instance.
+        """
+        kwds = self.get_current_kwargs(only_variable_length=only_variable_length)
+        backend = get_backend()
+        if self._marker_type != MarkerType.TEXTS:
+            return kwds
+        markup = getattr(backend, "text_markup", TextMarkup.PLAIN)
+        texts = kwds.get("texts")
+        if markup == TextMarkup.PLAIN and _any_text_is_mathtext(texts):
+            # Degrade on a copy: the user's marker kwargs stay intact so
+            # switching backend or re-plotting re-evaluates cleanly.
+            kwds = dict(kwds)
+            kwds["texts"] = _degrade_texts(texts)
+            self._warn_capability_once("text_markup", markup)
+        if not getattr(backend, "supports_text_rotation", False):
+            style_keys = [
+                key
+                for key in ("rotation", "horizontalalignment", "verticalalignment")
+                if kwds.get(key) is not None
+            ]
+            if style_keys:
+                kwds = dict(kwds)
+                for key in style_keys:
+                    kwds.pop(key)
+                self._warn_capability_once("supports_text_rotation", False, style_keys)
+        return kwds
+
+    def _warn_capability_once(self, kind, value, keys=None):
+        """Warn once per marker instance about a backend capability gap."""
+        if kind in self._capability_warnings:
+            return
+        self._capability_warnings.add(kind)
+        backend_name = type(get_backend()).__name__
+        if kind == "text_markup":
+            _logger.warning(
+                f"The {backend_name} backend renders plain text only "
+                f"(text_markup={value!r}); mathtext Texts markers are "
+                "displayed as plain text. Set "
+                "hs.preferences.Plot.backend = 'matplotlib' for full "
+                "mathtext rendering."
+            )
+        else:
+            dropped = ", ".join(repr(key) for key in keys)
+            _logger.warning(
+                f"The {backend_name} backend does not support text "
+                f"rotation (supports_text_rotation=False); dropping "
+                f"{dropped} from Texts markers."
+            )
+
     def _scale_kwarg(self, kwds, key=None):
         """
         Scale the kwarg by the current data.  This is useful for scaling the
@@ -745,7 +1058,7 @@ class Markers:
 
     def _update(self):
         if self._signal and self._collection is not None:
-            kwds = self.get_current_kwargs(only_variable_length=True)
+            kwds = self._kwargs_for_backend(only_variable_length=True)
             if self._using_native_markers:
                 get_backend().update_markers(self._collection, **kwds)
             else:
@@ -762,7 +1075,7 @@ class Markers:
     def _initialize_collection(self):
         mpl_cls = self._get_mpl_class()
         self._collection = mpl_cls(
-            **self.get_current_kwargs(),
+            **self._kwargs_for_backend(),
             offset_transform=self.offset_transform,
         )
         self._collection.set_transform(self.transform)
@@ -796,7 +1109,7 @@ class Markers:
                     self._marker_type,
                     offset_space=self._offset_transform,
                     transform_space=self._transform,
-                    **self.get_current_kwargs(),
+                    **self._kwargs_for_backend(),
                 )
                 self._using_native_markers = True
             except BackendCapabilityError:

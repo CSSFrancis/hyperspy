@@ -44,6 +44,172 @@ def use_anyplotlib(monkeypatch):
     preferences.Plot.backend = old
 
 
+class TestTextCapabilities:
+    def test_declaration_matches_installed_capability(self):
+        # The declarations are gated on the installed anyplotlib: the
+        # TeX-capable release gives tex-lite + rotation, older releases
+        # keep the safe plain-text declaration.
+        from hyperspy.drawing.backends.anyplotlib import _texts_tex_lite
+
+        supported = _texts_tex_lite()
+        assert AnyplotlibBackend.text_markup == ("tex-lite" if supported else "plain")
+        assert AnyplotlibBackend.supports_text_rotation is supported
+
+
+class TestTextCapabilityDegradation:
+    """Text capability handling for Texts markers: native passthrough on the
+    tex-lite backend, degradation on plain-only declarations."""
+
+    def _make_signal_and_marker(self):
+        s = hs.signals.Signal1D(np.arange(3 * 61).reshape((3, 61)).astype(float))
+        texts = np.array([r"$\mathrm{Fe}_{\mathrm{Ka}}$", r"$\alpha$"])
+        m = hs.plot.markers.Texts(
+            offsets=np.array([[10.0, 1.0], [30.0, 1.0]]),
+            texts=texts,
+            offset_transform="relative",
+            rotation=1.57,
+            horizontalalignment="left",
+            verticalalignment="bottom",
+            facecolor="black",
+        )
+        return s, m, texts
+
+    @staticmethod
+    def _texts_wire(m):
+        # Dump the marker's own group handle: the plot's marker registry
+        # also holds UI text groups (e.g. the navigation-position
+        # readout), so scanning it for the first "texts" group picks
+        # those up instead of the marker under test.
+        return m._collection.to_wire("test-group")
+
+    def test_wire_passes_mathtext_rotation_and_colour_through(self, caplog):
+        """With the TeX-capable anyplotlib the backend declares tex-lite +
+        rotation: mathtext reaches the wire unchanged (the JS TeX engine
+        typesets it), rotation and alignment ride along, and no capability
+        warning fires."""
+        import logging
+
+        from hyperspy.drawing.backends.anyplotlib import _texts_tex_lite
+
+        if not _texts_tex_lite():
+            pytest.skip("installed anyplotlib lacks TeX-capable texts markers")
+        s, m, texts = self._make_signal_and_marker()
+        with caplog.at_level(logging.WARNING):
+            s.plot()
+            s.add_marker(m)
+        texts_wire = self._texts_wire(m)
+        assert texts_wire["texts"] == [r"$\mathrm{Fe}_{\mathrm{Ka}}$", r"$\alpha$"]
+        assert texts_wire["color"] == "black"
+        assert texts_wire["rotation"] == pytest.approx(1.57)
+        assert texts_wire["halign"] == "left"
+        assert texts_wire["valign"] == "bottom"
+        assert not [r for r in caplog.records if r.name == "hyperspy.drawing.markers"]
+        # The user's marker kwargs are never modified
+        np.testing.assert_array_equal(m.kwargs["texts"], texts)
+        s._plot.close()
+
+    def test_warn_once_across_update_cycles(self, caplog, monkeypatch):
+        """Forced to a plain-only declaration, the warn-once guard keeps
+        one record per capability kind across update cycles."""
+        import logging
+
+        from hyperspy.drawing.backends._protocol import TextMarkup
+
+        monkeypatch.setattr(AnyplotlibBackend, "text_markup", TextMarkup.PLAIN)
+        monkeypatch.setattr(AnyplotlibBackend, "supports_text_rotation", False)
+        s = hs.signals.Signal1D(np.arange(2 * 47).reshape((2, 47)).astype(float))
+        texts = np.empty(2, dtype=object)
+        texts[0] = [r"$\mathrm{Fe}_{\mathrm{Ka}}$", r"$\alpha$"]
+        texts[1] = ["plain", r"$\beta$"]
+        m = hs.plot.markers.Texts(
+            offsets=np.array([[10.0, 1.0], [30.0, 1.0]]),
+            texts=texts,
+            rotation=1.57,
+            facecolor="black",
+        )
+        with caplog.at_level(logging.WARNING):
+            s.plot()
+            s.add_marker(m)
+            # Ragged texts re-run the degradation on the update path; the
+            # warn-once guard must keep the log at one record per kind.
+            s.axes_manager[0].index = 1
+        markup_warnings = [r for r in caplog.records if "text_markup" in r.message]
+        rotation_warnings = [
+            r for r in caplog.records if "supports_text_rotation" in r.message
+        ]
+        assert len(markup_warnings) == 1
+        assert len(rotation_warnings) == 1
+        s._plot.close()
+
+    def test_ragged_texts_degrade_elementwise(self, caplog, monkeypatch):
+        import logging
+
+        from hyperspy.drawing.backends._protocol import TextMarkup
+
+        monkeypatch.setattr(AnyplotlibBackend, "text_markup", TextMarkup.PLAIN)
+        s = hs.signals.Signal1D(np.arange(2 * 47).reshape((2, 47)).astype(float))
+        texts = np.empty(2, dtype=object)
+        texts[0] = [r"$\mathrm{Fe}_{\mathrm{Ka}}$"]
+        texts[1] = ["plain", r"$\alpha$"]
+        offsets = np.empty(2, dtype=object)
+        offsets[0] = np.array([[10.0, 1.0]])
+        offsets[1] = np.array([[10.0, 1.0], [30.0, 1.0]])
+        m = hs.plot.markers.Texts(offsets=offsets, texts=texts)
+        with caplog.at_level(logging.WARNING):
+            s.plot()
+            s.add_marker(m)
+        assert self._texts_wire(m)["texts"] == ["Fe_Ka"]
+        s.axes_manager[0].index = 1
+        assert self._texts_wire(m)["texts"] == ["plain", "α"]
+        s._plot.close()
+
+    def test_capability_defaults_when_backend_has_no_attributes(
+        self, caplog, monkeypatch
+    ):
+        """A backend without the capability attributes must degrade exactly
+        like an explicit plain declaration (getattr defaults, IS-7)."""
+        import logging
+
+        monkeypatch.delattr(AnyplotlibBackend, "text_markup")
+        monkeypatch.delattr(AnyplotlibBackend, "supports_text_rotation")
+        s, m, texts = self._make_signal_and_marker()
+        with caplog.at_level(logging.WARNING):
+            s.plot()
+            s.add_marker(m)
+        texts_wire = self._texts_wire(m)
+        assert texts_wire["texts"] == ["Fe_Ka", "α"]
+        markup_warnings = [r for r in caplog.records if "text_markup" in r.message]
+        rotation_warnings = [
+            r for r in caplog.records if "supports_text_rotation" in r.message
+        ]
+        assert len(markup_warnings) == 1
+        assert len(rotation_warnings) == 1
+        s._plot.close()
+
+    def test_lazy_signal_texts_degrade(self, caplog, monkeypatch):
+        import logging
+
+        from hyperspy.drawing.backends._protocol import TextMarkup
+
+        monkeypatch.setattr(AnyplotlibBackend, "text_markup", TextMarkup.PLAIN)
+        s = hs.signals.Signal1D(
+            np.arange(2 * 47).reshape((2, 47)).astype(float)
+        ).as_lazy()
+        texts = np.array([r"$\mathrm{Fe}_{\mathrm{Ka}}$", r"$\alpha$"])
+        m = hs.plot.markers.Texts(
+            offsets=np.array([[10.0, 1.0], [30.0, 1.0]]),
+            texts=texts,
+            rotation=1.57,
+        )
+        with caplog.at_level(logging.WARNING):
+            s.plot()
+            s.add_marker(m)
+        assert self._texts_wire(m)["texts"] == ["Fe_Ka", "α"]
+        markup_warnings = [r for r in caplog.records if "text_markup" in r.message]
+        assert len(markup_warnings) == 1
+        s._plot.close()
+
+
 # ---------------------------------------------------------------------------
 # Unit tests — AnyplotlibBackend directly
 # ---------------------------------------------------------------------------
@@ -1142,6 +1308,44 @@ class TestNativeMarkers:
         )
         assert "units" not in out
 
+    def test_translate_texts_facecolor_to_color(self, backend):
+        out = backend._translate_marker_kwargs(
+            "texts", "data", {"facecolor": "black", "edgecolor": "red"}
+        )
+        assert out["color"] == "black"
+        assert "facecolor" not in out
+        assert out["edgecolor"] == "red"
+
+    def test_texts_wire_colour_from_facecolor(self, backend, plot1d_ax):
+        handle = backend.create_markers(
+            plot1d_ax,
+            "texts",
+            offset_space="data",
+            transform_space="display",
+            offsets=[[10.0, 1.0]],
+            texts=["label"],
+            facecolor="black",
+        )
+        wire = handle.to_wire("test-group")
+        assert wire["color"] == "black"
+
+    def test_translate_preserves_empty_array_shape(self, backend):
+        """Empty position arrays must keep their ndarray shape: ``.tolist()``
+        flattens an empty ``(0, 2)`` offsets array to ``[]``, which the wire
+        format rejects because ``np.asarray([])`` is shape ``(0,)``."""
+        out = backend._translate_marker_kwargs(
+            "texts", "data", {"offsets": np.empty((0, 2))}
+        )
+        assert isinstance(out["offsets"], np.ndarray)
+        assert out["offsets"].shape == (0, 2)
+
+    def test_translate_serialises_nonempty_array(self, backend):
+        """Non-empty arrays are still converted to JSON-friendly lists."""
+        out = backend._translate_marker_kwargs(
+            "texts", "data", {"offsets": np.array([[1.0, 2.0]])}
+        )
+        assert out["offsets"] == [[1.0, 2.0]]
+
     # ── 1-D marker types on Plot1D ────────────────────────────────────────
 
     def test_create_vlines_on_plot1d(self, backend, plot1d_ax):
@@ -1273,6 +1477,32 @@ class TestNativeMarkers:
         s.plot()
         s.add_marker(m)
         s.axes_manager[0].index = 2
+        s._plot.close()
+
+    def test_signal1d_remove_all_marker_items_no_crash(self):
+        """Removing every item of a live marker collection must update the
+        plot without raising.  Regression test: the empty offsets array was
+        flattened to a shape-losing list on the way to the wire format,
+        which crashed e.g. eXSpy's ``remove_xray_lines_markers()``."""
+        s = hs.signals.Signal1D(np.arange(3 * 61).reshape((3, 61)).astype(float))
+        s.plot()
+        m = hs.plot.markers.Texts(
+            offsets=np.array([[10.0, 1.0], [30.0, 1.0], [50.0, 1.0]]),
+            texts=["a", "b", "c"],
+            offset_transform="relative",
+        )
+        s.add_marker(m)
+        m.remove_items([0, 1, 2])
+        assert len(m) == 0
+        s._plot.close()
+
+    def test_signal1d_add_empty_marker_no_crash(self):
+        """A marker created empty (e.g. all items removed before plotting)
+        must plot without raising."""
+        s = hs.signals.Signal1D(np.arange(2 * 47).reshape((2, 47)).astype(float))
+        s.plot()
+        m = hs.plot.markers.Texts(offsets=np.empty((0, 2)), texts=np.array([]))
+        s.add_marker(m)
         s._plot.close()
 
 
